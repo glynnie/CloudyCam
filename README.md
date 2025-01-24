@@ -32,7 +32,7 @@
    (eg. /Media/Username/)
 5. 🔐You can toggle between authentication method (password or SSH key).
 6. 🔑Upload a keyfile to use key based authenticatication (e.g. rsa/.pem file/SSH key etc.)
-7. ➕Select the media files you wish to upload from your device using the (+) symbol in the middle of the screen.
+7. ➕Select the media files you wish to upload from your device using the (📎) symbol on the right hand side of the screen.
 8. 💾Tap the "Upload" button indicated by the 'SAVE & UPLOAD' ICON to initiate the file transfer process using SSH.
 9. 📊Monitor the progress of the upload using the progress bar.
 10. 👌Rinse and repeat, as desired.

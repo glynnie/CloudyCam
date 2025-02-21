@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">cloudycam</string>
+    <bool name="video">false</bool>
+</resources>

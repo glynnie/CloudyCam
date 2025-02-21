@@ -16,7 +16,7 @@
 
 ## Installation
 
-1. ⏬ Download the latest APK file from the [releases](https://github.com/your-username/CloudyCam/releases) section of this repository.
+1. ⏬ Download the latest APK file from the [releases](https://github.com/glynnie/CloudyCam/releases) section of this repository.
 2. 📂 On your Android device, navigate to the location of the APK file using a file manager.
 3. 💿Tap on the APK file to begin the installation process.
 4. ▶️Follow the on-screen instructions to complete the installation.
@@ -44,7 +44,7 @@ If you encounter any bugs, have feature requests, or would like to contribute co
 
 ## License
 
-This project is license
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
 
 Built on Jsch.
 

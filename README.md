@@ -40,18 +40,18 @@
 ## Contributing
 
 Contributions to CloudyCam are welcome, Especially in the early days of the project! 
-If you encounter any bugs, have feature requests, or would like to contribute code improvements, please feel free to open an issue or submit a pull request on [GitHub](https://github.com/your-username/CloudyCam).
+If you encounter any bugs, have feature requests, or would like to contribute code improvements, please feel free to open an issue or submit a pull request.
 
 ## License
 
-This project is licens
+This project is license
 
 Built on Jsch.
 
 #known bugs
 User interface is locked to portrait mode
 
-Copyright (c) 2024 Glyndwr Gimblett
+Copyright (c) 2025 Glyndwr Gimblett
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

@@ -51,6 +51,7 @@ import java.text.DecimalFormat
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.graphics.Color
 import android.os.Build
 import android.text.Html
 import android.widget.RemoteViews
@@ -62,6 +63,8 @@ import androidx.core.net.toUri
 import java.io.FileOutputStream
 import java.io.FileReader
 import java.io.OutputStream
+import java.text.SimpleDateFormat
+import java.util.*
 
 
 //END OF IMPORTS START OF VARIABLES
@@ -82,7 +85,6 @@ class CameraActivity : AppCompatActivity() {
     lateinit var port: EditText
     lateinit var remoteFilePath: EditText
     lateinit var sharedPreferences: SharedPreferences
-    var filename: String = ""
     lateinit var progressBar: ProgressBar
     lateinit var extension: String
     var lastkey: String? = null
@@ -92,7 +94,7 @@ class CameraActivity : AppCompatActivity() {
     var filesizeformatted: String = ""
     var video: Boolean = false
     var privatemode: Boolean = false
-
+    var filename: String = ""
     //END OF VARIABLES START OF PERMISSION CHECK
     private val permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         arrayOf(
@@ -503,14 +505,17 @@ class CameraActivity : AppCompatActivity() {
         knownHosts = sharedPreferences.getString(KNOWN_HOSTS_KEY, "") ?: ""
 
 
-                loadSavedEntries()
+        loadSavedEntries()
         if (!arePermissionsGranted()) {
             requestPermissions()
         } else {
-            val videoSwitchState = readBooleanFromFile("videoSwitchState.txt")
-            val privatemode = readBooleanFromFile("privateSwitchState.txt")
+            video = readBooleanFromFile("videoSwitchState.txt")
+            privatemode = readBooleanFromFile("privateSwitchState.txt")
+            val privateSwitch: Switch = findViewById(R.id.privatemode)
+            if (privatemode) {privateSwitch.setTextColor(Color.GREEN)}else{privateSwitch.setTextColor(Color.parseColor("#A7A2A9"))}
 
-            takeMedia(videoSwitchState,privatemode)
+
+            takeMedia(video, privatemode)
 
         }
         val upload = findViewById<Button>(R.id.button_upload)
@@ -532,13 +537,19 @@ class CameraActivity : AppCompatActivity() {
         }
         findViewById<Button>(R.id.buttonretake)?.apply {
             setOnClickListener {
-                takeMedia(video,privatemode)
+                takeMedia(video, privatemode)
             }
         }
 
         val pairsSwitch: Switch = findViewById(R.id.pairs)
         keymode = readBooleanFromFile("pairsSwitchState.txt")
-        val pemButton: Button = findViewById<Button?>(R.id.pem).apply {visibility = if(keymode){Button.VISIBLE}else{Button.INVISIBLE}  }
+        val pemButton: Button = findViewById<Button?>(R.id.pem).apply {
+            visibility = if (keymode) {
+                Button.VISIBLE
+            } else {
+                Button.INVISIBLE
+            }
+        }
         pairsSwitch.isChecked = keymode
         pairsSwitch.setOnCheckedChangeListener { _, isChecked ->
             pemButton.visibility = if (isChecked) {
@@ -561,19 +572,28 @@ class CameraActivity : AppCompatActivity() {
         videoSwitch.setOnCheckedChangeListener { _, isChecked ->
             sharedPreferences.edit().putBoolean("videoSwitchState", isChecked).apply()
 
-          video = isChecked
+            video = isChecked
 
             writeBooleanToFile(video, "videoSwitchState.txt")
 
         }
         val privateSwitch: Switch = findViewById(R.id.privatemode)
+        privateSwitch.isChecked = sharedPreferences.getBoolean("privateSwitchState", false)
+
         privateSwitch.setOnCheckedChangeListener { _, isChecked ->
-            privateSwitch.isChecked = readBooleanFromFile("privateSwitchState.txt")
+            // Update the switch state in the shared preferences based on the current state
+            sharedPreferences.edit().putBoolean("privateSwitchState", isChecked).apply()
+
+            // Set the privatemode variable accordingly
             privatemode = isChecked
 
-            writeBooleanToFile(privatemode, "privateSwitchState.txt") ////
-
+            // Write the new state to the file
+            writeBooleanToFile(isChecked, "privateSwitchState.txt")
+privatemode = readBooleanFromFile("privateSwitchState.txt")
+            if (privatemode) {privateSwitch.setTextColor(Color.GREEN)}else{privateSwitch.setTextColor(Color.parseColor("#A7A2A9"))}
         }
+
+
 
         findViewById<ImageView>(R.id.gallery)?.apply {
             setOnClickListener {
@@ -592,9 +612,6 @@ class CameraActivity : AppCompatActivity() {
                 listwithoutkey()
             }
         }
-
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-
 
     }
 
@@ -718,19 +735,26 @@ class CameraActivity : AppCompatActivity() {
                 sftpChannel!!.connect()
 
                 val entries = sftpChannel!!.ls(folderPath).toArray().toMutableList()
+                val detailedEntries = entries.map {parseFileEntry(it as ChannelSftp.LsEntry) }
+
+
+
                 sftpChannel!!.disconnect()
                 session.disconnect()
 
                 runOnUiThread {
-                    finallist(entries)
-                    progressBar.visibility = ProgressBar.INVISIBLE
 
+                    showlisthtml(detailedEntries.toString())
+
+
+                    progressBar.visibility = ProgressBar.INVISIBLE
                 }
 
 
-            } catch (e: JSchException) {
+            } catch (e: Exception) {
                 runOnUiThread {
-                    show("Failed to establish SSH connection: ${e.message}")
+                    val message = e.message.toString().replace("file","Folder")
+                    show("Failed: $message")
                     // Set cancel button visibility to INVISIBLE when upload fails
                     progressBar.visibility = ProgressBar.INVISIBLE
 
@@ -777,9 +801,7 @@ class CameraActivity : AppCompatActivity() {
 
             return
         }
-        if (!port.equals(22)) {
-            show("Warning! Port is not 22")
-        }
+        
 
 
         runBlocking {
@@ -853,7 +875,7 @@ class CameraActivity : AppCompatActivity() {
         user: String,
         host: String,
         port: Int,
-        password: String,
+        password: String
     ) {
         val folderPath = remoteFilePath.text.toString()
 
@@ -865,96 +887,71 @@ class CameraActivity : AppCompatActivity() {
                 session.setConfig("StrictHostKeyChecking", "no")
                 session.connect()
 
-                sftpChannel = session.openChannel("sftp") as ChannelSftp
-                sftpChannel!!.connect()
+                val sftpChannel = session.openChannel("sftp") as ChannelSftp
+                sftpChannel.connect()
 
-                val entries = sftpChannel!!.ls(folderPath,).toArray().toMutableList()
-                sftpChannel!!.disconnect()
+                val entries = sftpChannel.ls(folderPath).toArray().toMutableList()
+                val detailedEntries = entries.map {parseFileEntry(it as ChannelSftp.LsEntry) }
+
+                sftpChannel.disconnect()
                 session.disconnect()
 
                 runOnUiThread {
-                    finallist(entries)
-                    progressBar.visibility = ProgressBar.INVISIBLE
 
+                    showlisthtml(detailedEntries.sortedDescending().reversed().toString().removeSurrounding("[","]"))
+
+
+                    progressBar.visibility = ProgressBar.INVISIBLE
                 }
 
-
-            } catch (e: JSchException) {
+            } catch (e: Exception) {
                 runOnUiThread {
-                    show("Failed to establish SSH connection: ${e.message}")
+                    val message = e.message.toString().replace("file","Folder")
+                    show("Failed: $message")
                     // Set cancel button visibility to INVISIBLE when upload fails
                     progressBar.visibility = ProgressBar.INVISIBLE
-
                 }
             }
+
+
+
         }.start()
     }
+    private fun parseFileEntry(entry: ChannelSftp.LsEntry): String {
+        val fileName = entry.filename
 
-    private fun finallist(filesAndFolders: MutableList<Any>) {
-        runOnUiThread {
-
-            val postfix: (String) -> String = { entry ->
-                val lastColonIndex = entry.lastIndexOf(':')
-                if (lastColonIndex >= 0) {
-                    val modifiedEntry =
-                        StringBuilder(entry)// Add linespaces before the date and after the minute and removes the trailing spaces
-                    modifiedEntry.insert(lastColonIndex - 9, "\n").insert(lastColonIndex + 5, "\n")
-                    modifiedEntry.toString()
-                } else {
-                    entry // If no colon found, return the original entry
-                }
-            }
+        val color = if (fileName.matches(Regex("^[^.].*\\..+$"))) "#80ccff" else "#80ff80"
+        val emoji = if (fileName.matches(Regex("^[^.].*\\..+$"))) "📄" else "📁"
+        val attrs = entry.attrs
+        val fileSize = formatFileSize(attrs.size)
+        val permissions = Integer.toOctalString(attrs.permissions)
+        val timestamp = attrs.mTime * 1000L // Convert to milliseconds
+        val date = Date(timestamp)
+        val dateFormat = SimpleDateFormat("dd MMM yyyy HH:mm")
+        val formattedDate = dateFormat.format(date)
+        val firstLine = "<font color=\"$color\"><br><br><b>$emoji $fileName</b></font><br>$fileSize<br>$formattedDate<br>$permissions"
 
 
-            val datespace = filesAndFolders.map { item ->
-                (makeFirstLineBold(
-                    reverseLines(
-                        postfix(
-                            item.toString().replace(Regex("\\h{3,}"), "  ")
-                        )
-                    )
-                ))
-            }
+        // Display the popup with the first line
 
+        return firstLine
+    }
 
-            val listdialog = AlertDialog.Builder(this@CameraActivity, R.style.CustomAlertDialogList)
-                .setTitle("Directory Information")
-                .setMessage(
-                    Html.fromHtml(datespace.sorted().joinToString("\n\n"))
-                )
-                .setPositiveButton("OK") { dialog, _ -> dialog.dismiss() }
-                .setCancelable(true)
-                .show()
-            listdialog.findViewById<TextView>(android.R.id.message)?.apply {
-                textSize = 10f
-            }
+    private fun showlisthtml(firstLine: String) {
+        val listdialog = AlertDialog.Builder(this@CameraActivity, R.style.CustomAlertDialogList)
+            .setTitle("Directory Information")
+            .setMessage(Html.fromHtml(firstLine))
+            .setPositiveButton("OK") { dialog, _ -> dialog.dismiss() }
+            .setCancelable(true)
+            .show()
+
+        listdialog.findViewById<TextView>(android.R.id.message)?.apply {
+            textSize = 10f
         }
     }
 
-    fun reverseLines(input: String): String {
-        val lines = input.lines() // Split the input into lines
-        val reversedLines = lines.reversed() // Reverse the order of lines
-        return reversedLines.joinToString("\n") // Join the reversed lines back together
-    }
 
-    fun makeFirstLineBold(input: String): String {
-        var color: String
-        var emoji: String
-        val lines = input.lines() // Split the input into lines
-        val firstLine =
-            lines.firstOrNull() ?: return input // Get the first line, or return input if empty
-        val restOfLines = lines.drop(1) // Get the rest of the lines after the first one
-        if (firstLine.matches(Regex("^[^.].*\\..+$"))) {
-            color = "#80ccff"
-            emoji = "📄"
-        } else {
-            color = "#80ff80"
-            emoji = "📁"
-        }
-        val boldFirstLine =
-            "<font color=\"$color\"><br><br><b>$emoji $firstLine</b><br></font>" // Add bold tags to the first line
-        return boldFirstLine + restOfLines.joinToString("<br>") // Join the modified first line with the rest of the lines
-    }
+
 
     fun openFilePicker() {
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
@@ -1457,6 +1454,8 @@ takeAndHandleMedia(isVideo,privatemode)
                                 sftpChannel!!.disconnect()
                                 session.disconnect()
                                 show("Upload was cancelled by user")
+                                cancel.visibility = View.INVISIBLE
+                                cancel.elevation = 0f
                             }
                         }
 
@@ -1599,6 +1598,8 @@ takeAndHandleMedia(isVideo,privatemode)
                                 sftpChannel!!.disconnect()
                                 session.disconnect()
                                 show("Upload was cancelled by user")
+                                cancel.visibility = View.INVISIBLE
+                                cancel.elevation = 0f
                             }
                         }
 

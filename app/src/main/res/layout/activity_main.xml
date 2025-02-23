@@ -336,14 +336,5 @@
         app:layout_constraintEnd_toEndOf="@+id/pem"
         app:layout_constraintTop_toBottomOf="@+id/editTextRemoteFilePath" />
 
-    <ImageButton
-        android:id="@+id/imageView"
-        android:layout_width="54dp"
-        android:layout_height="44dp"
-        app:layout_constraintBottom_toBottomOf="@id/progressBar"
-        app:layout_constraintStart_toStartOf="@id/privatemode"
-        android:background="@color/black"
-        app:srcCompat="@drawable/folder_open_fill0_wght400_grad0_opsz24" />
-
 
 </androidx.constraintlayout.widget.ConstraintLayout>

@@ -57,12 +57,6 @@ import android.text.Html
 import android.widget.RemoteViews
 import androidx.core.app.NotificationCompat
 import androidx.core.content.FileProvider
-import androidx.core.graphics.drawable.RoundedBitmapDrawable
-import androidx.core.net.toFile
-import androidx.core.net.toUri
-import java.io.FileOutputStream
-import java.io.FileReader
-import java.io.OutputStream
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -165,7 +159,7 @@ class CameraActivity : AppCompatActivity() {
                 snap = null
 
 
-            }else {                show("Image capture failed or canceled.")
+            }else {                show("Capture canceled.")
             }
             }
         }

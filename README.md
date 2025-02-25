@@ -5,9 +5,9 @@
 
 - 🔒 **Secure Upload**: Utilizes SSH protocol for secure communication with SFTP servers, ensuring data integrity and confidentiality.
 - ⏩ **Lightweight**: Lightweight design minimizing resource consumption on the device.
-- 😸**User-friendly Interface**: Simple intuitive interface, easy for users to configure server settings and initiate file transfers.
+- 😸 **User-friendly Interface**: Simple intuitive interface, easy for users to configure server settings and initiate file transfers.
 - 🗃️ **Supports Various Media Formats**: Compatible with a wide range of video and image formats.
-- 🧰**Customizable Settings**: Users can customize settings such as server hostname, port, username, and authentication method to suit their specific requirements.
+- 🧰 **Customizable Settings**: Users can customize settings such as server hostname, port, username, and authentication method to suit their specific requirements.
 
 ## Requirements
 
@@ -18,24 +18,24 @@
 
 1. ⏬ Download the latest APK file from the [releases](https://github.com/glynnie/CloudyCam/releases) section of this repository.
 2. 📂 On your Android device, navigate to the location of the APK file using a file manager.
-3. 💿Tap on the APK file to begin the installation process.
-4. ▶️Follow the on-screen instructions to complete the installation.
+3. 💿 Tap on the APK file to begin the installation process.
+4. ▶️ Follow the on-screen instructions to complete the installation.
 
 ## Usage
 
-1. ▶️Launch the CloudyCam app on your Android device.
-2. 🛂Permission is needed on first launch for the gallery "DCIM" for saving photos and Camera for the app to work!
-3. 📸Snap a photo if you wish or (press back to upload your own).
-4. 🧭Configure the server settings by entering the:
+1. ▶️ Launch the CloudyCam app on your Android device.
+2. 🛂 Permission is needed on first launch for the gallery "DCIM" for saving photos and Camera for the app to work!
+3. 📸 Snap a photo if you wish or (press back to upload your own).
+4. 🧭 Configure the server settings by entering the:
    username, password, hostname, port (eg.22)
    and a valid folder path to your output directory on the server:
    (eg. /Media/Username/)
-5. 🔐You can toggle between authentication method (password or SSH key).
-6. 🔑Upload a keyfile to use key based authenticatication (e.g. rsa/.pem file/SSH key etc.)
-7. ➕Select the media files you wish to upload from your device using the (📎) symbol on the right hand side of the screen.
-8. 💾Tap the "Upload" button indicated by the 'SAVE & UPLOAD' ICON to initiate the file transfer process using SSH.
-9. 📊Monitor the progress of the upload using the progress bar.
-10. 👌Rinse and repeat, as desired.
+5. 🔐 You can toggle between authentication method (password or SSH key).
+6. 🔑 Upload a keyfile to use key based authenticatication (e.g. rsa/.pem file/SSH key etc.)
+7. ➕ Select the media files you wish to upload from your device using the (📎) symbol on the right hand side of the screen.
+8. 💾 Tap the "Upload" button indicated by the 'SAVE & UPLOAD' ICON to initiate the file transfer process using SSH.
+9. 📊 Monitor the progress of the upload using the progress bar.
+10. 👌 Rinse and repeat, as desired.
 
 ## Contributing
 

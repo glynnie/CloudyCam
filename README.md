@@ -1,5 +1,11 @@
 # CloudyCam
-"A lightweight app, serving as a front end to SSH: For fast and secure upload of media via SSH/SFTP, from a phone"
+<p align="center">
+                                        <img src="https://github.com/user-attachments/assets/82291efe-e18d-4dca-912c-aa168cae1a48">
+
+
+
+<p align="center">"A lightweight app, serving as a front end to SSH: For fast and secure upload of media via SSH/SFTP, from a phone" </p>
+
 
 ## Features
 

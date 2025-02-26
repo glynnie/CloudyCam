@@ -43,11 +43,14 @@ dependencies {
     implementation(libs.androidx.constraintlayout)
     implementation("androidx.exifinterface:exifinterface:1.3.6")
     implementation(libs.androidx.foundation.layout.android)
+    implementation(libs.androidx.preference)
+    implementation ("androidx.biometric:biometric:1.2.0-alpha04")
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
     implementation("com.jcraft:jsch:0.1.55")
     implementation ("com.google.code.gson:gson:2.10.1")
+
 
 
 }

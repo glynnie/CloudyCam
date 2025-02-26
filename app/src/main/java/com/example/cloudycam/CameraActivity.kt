@@ -53,12 +53,17 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.graphics.Color
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.text.Html
 import android.widget.RemoteViews
 import androidx.core.app.NotificationCompat
 import androidx.core.content.FileProvider
 import java.text.SimpleDateFormat
 import java.util.*
+import androidx.biometric.BiometricManager
+import androidx.biometric.BiometricPrompt
+
 
 
 //END OF IMPORTS START OF VARIABLES
@@ -89,21 +94,27 @@ class CameraActivity : AppCompatActivity() {
     var video: Boolean = false
     var privatemode: Boolean = false
     var filename: String = ""
+    private var shouldRequestBiometric = true
+
+
     //END OF VARIABLES START OF PERMISSION CHECK
     private val permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         arrayOf(
             Manifest.permission.CAMERA,
             Manifest.permission.ACCESS_MEDIA_LOCATION,
             Manifest.permission.RECEIVE_BOOT_COMPLETED,
-            Manifest.permission.POST_NOTIFICATIONS
+            Manifest.permission.POST_NOTIFICATIONS,
+            Manifest.permission.USE_BIOMETRIC
         )
     } else {
         arrayOf(
             Manifest.permission.CAMERA,
             Manifest.permission.ACCESS_MEDIA_LOCATION,
             Manifest.permission.RECEIVE_BOOT_COMPLETED,
+            Manifest.permission.USE_BIOMETRIC
         )
     }
+
 
     private val requestPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { permissions ->
@@ -115,6 +126,7 @@ class CameraActivity : AppCompatActivity() {
                 takeMedia(videoSwitchState, privatemode)
             } else {
                 show("Permissions not granted")
+                finish()
             }
         }
     // END OF PERMISSION CHECK START OF IMAGE CAPTURE
@@ -122,6 +134,7 @@ class CameraActivity : AppCompatActivity() {
     private val takeMediaResult =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             if (result.resultCode == Activity.RESULT_OK && privatemode) {
+                //authenticateUser()
                 latestTmpFileUri = snap
 
                 // Image capture was successful
@@ -141,6 +154,7 @@ class CameraActivity : AppCompatActivity() {
 
                     }}}else{
             if (result.resultCode == Activity.RESULT_OK) {
+               // authenticateUser()
                 latestTmpFileUri = snap
                 // Image capture was successful
                 latestTmpFileUri?.let { uri ->
@@ -154,12 +168,14 @@ class CameraActivity : AppCompatActivity() {
                 }
              } else {            if (result.resultCode == Activity.RESULT_CANCELED && !privatemode) {
                 // Image capture was not successful (e.g., canceled or failed)
+                //authenticateUser()
                 show("Capture canceled.")
                 contentResolver.delete(snap!!, null, null)
                 snap = null
 
 
-            }else {                show("Capture canceled.")
+            }else { authenticateUser()
+                show("Capture canceled.")
             }
             }
         }
@@ -491,131 +507,198 @@ class CameraActivity : AppCompatActivity() {
 //ON CREATE ACTIONS
     @SuppressLint("WrongViewCast", "UseSwitchCompatOrMaterialCode", "SuspiciousIndentation")
     override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
-        createNotificationChannel()
-        username = findViewById(R.id.editTextUsername)
-        password = findViewById(R.id.editTextPassword)
-        hostname = findViewById(R.id.editTextHostname)
-        port = findViewById(R.id.editTextPort)
-        remoteFilePath = findViewById(R.id.editTextRemoteFilePath)
-        progressBar = findViewById(R.id.progressBar)
-        progressBarHorizontal = findViewById(R.id.progressBarHorizontal)
-        sharedPreferences = getSharedPreferences("com.example.cloudycam", Context.MODE_PRIVATE)
-        knownHosts = sharedPreferences.getString(KNOWN_HOSTS_KEY, "") ?: ""
+    super.onCreate(savedInstanceState)
+
+    setContentView(R.layout.activity_main)
+    createNotificationChannel()
+    username = findViewById(R.id.editTextUsername)
+    password = findViewById(R.id.editTextPassword)
+    hostname = findViewById(R.id.editTextHostname)
+    port = findViewById(R.id.editTextPort)
+    remoteFilePath = findViewById(R.id.editTextRemoteFilePath)
+    progressBar = findViewById(R.id.progressBar)
+    progressBarHorizontal = findViewById(R.id.progressBarHorizontal)
+    sharedPreferences = getSharedPreferences("com.example.cloudycam", Context.MODE_PRIVATE)
+    knownHosts = sharedPreferences.getString(KNOWN_HOSTS_KEY, "") ?: ""
 
 
-        loadSavedEntries()
-        if (!arePermissionsGranted()) {
-            requestPermissions()
-        } else {
-            video = readBooleanFromFile("videoSwitchState.txt")
-            privatemode = readBooleanFromFile("privateSwitchState.txt")
-            val privateSwitch: Switch = findViewById(R.id.privatemode)
-            if (privatemode) {privateSwitch.setTextColor(Color.GREEN)}else{privateSwitch.setTextColor(Color.parseColor("#A7A2A9"))}
-
-
-            takeMedia(video, privatemode)
-
-        }
-        val upload = findViewById<Button>(R.id.button_upload)
-        upload.setOnClickListener {
-            if (keymode) {
-                if (lastkey.isNullOrBlank()) {
-                    show("Select a Private Key")
-                } else {
-                    latestTmpFileUri?.let { it1 ->
-                        uploadFILEToServerWithAuthMethod(
-                            it1,
-                            lastkey!!
-                        )
-                    }
-                }
-            } else {
-                latestTmpFileUri?.let { it1 -> uploadFILEToServer(it1) }
-            }
-        }
-        findViewById<Button>(R.id.buttonretake)?.apply {
-            setOnClickListener {
-                takeMedia(video, privatemode)
-            }
-        }
-
-        val pairsSwitch: Switch = findViewById(R.id.pairs)
-        keymode = readBooleanFromFile("pairsSwitchState.txt")
-        val pemButton: Button = findViewById<Button?>(R.id.pem).apply {
-            visibility = if (keymode) {
-                Button.VISIBLE
-            } else {
-                Button.INVISIBLE
-            }
-        }
-        pairsSwitch.isChecked = keymode
-        pairsSwitch.setOnCheckedChangeListener { _, isChecked ->
-            pemButton.visibility = if (isChecked) {
-                keymode = true
-                writeBooleanToFile(keymode, "pairsSwitchState.txt")
-                Button.VISIBLE
-            } else {
-                keymode = false
-                writeBooleanToFile(keymode, "pairsSwitchState.txt")
-                Button.INVISIBLE
-            }
-        }
-        pemButton.setOnClickListener {
-            openKeyFilePicker()
-
-        }
-
-        val videoSwitch: Switch = findViewById(R.id.video)
-        videoSwitch.isChecked = sharedPreferences.getBoolean("videoSwitchState", false)
-        videoSwitch.setOnCheckedChangeListener { _, isChecked ->
-            sharedPreferences.edit().putBoolean("videoSwitchState", isChecked).apply()
-
-            video = isChecked
-
-            writeBooleanToFile(video, "videoSwitchState.txt")
-
-        }
+    loadSavedEntries()
+    if (!arePermissionsGranted()) {
+        requestPermissions()
+    } else {
+        video = readBooleanFromFile("videoSwitchState.txt")
+        privatemode = readBooleanFromFile("privateSwitchState.txt")
         val privateSwitch: Switch = findViewById(R.id.privatemode)
-        privateSwitch.isChecked = sharedPreferences.getBoolean("privateSwitchState", false)
-
-        privateSwitch.setOnCheckedChangeListener { _, isChecked ->
-            // Update the switch state in the shared preferences based on the current state
-            sharedPreferences.edit().putBoolean("privateSwitchState", isChecked).apply()
-
-            // Set the privatemode variable accordingly
-            privatemode = isChecked
-
-            // Write the new state to the file
-            writeBooleanToFile(isChecked, "privateSwitchState.txt")
-privatemode = readBooleanFromFile("privateSwitchState.txt")
-            if (privatemode) {privateSwitch.setTextColor(Color.GREEN)}else{privateSwitch.setTextColor(Color.parseColor("#A7A2A9"))}
+        if (privatemode) {
+            privateSwitch.setTextColor(Color.GREEN)
+        } else {
+            privateSwitch.setTextColor(Color.parseColor("#A7A2A9"))
         }
 
 
+        takeMedia(video, privatemode)
 
-        findViewById<ImageView>(R.id.gallery)?.apply {
-            setOnClickListener {
-                openFilePickerForUpload()
-            }
-        }
-        val listbutton = findViewById<Button>(R.id.buttonlist)
-        listbutton.setOnClickListener {
-            if (keymode) {
-                if (lastkey.isNullOrBlank()) {
-                    show("Select a Private Key")
-                } else {
-                    listwithkey()
-                }
+    }
+    val upload = findViewById<Button>(R.id.button_upload)
+    upload.setOnClickListener {
+        if (keymode) {
+            if (lastkey.isNullOrBlank()) {
+                show("Select a Private Key")
             } else {
-                listwithoutkey()
+                latestTmpFileUri?.let { it1 ->
+                    uploadFILEToServerWithAuthMethod(
+                        it1,
+                        lastkey!!
+                    )
+                }
             }
+        } else {
+            latestTmpFileUri?.let { it1 -> uploadFILEToServer(it1) }
         }
+    }
+    findViewById<Button>(R.id.buttonretake)?.apply {
+        setOnClickListener {
+            takeMedia(video, privatemode)
+        }
+    }
+
+    val pairsSwitch: Switch = findViewById(R.id.pairs)
+    keymode = readBooleanFromFile("pairsSwitchState.txt")
+    val pemButton: Button = findViewById<Button?>(R.id.pem).apply {
+        visibility = if (keymode) {
+            Button.VISIBLE
+        } else {
+            Button.INVISIBLE
+        }
+    }
+    pairsSwitch.isChecked = keymode
+    pairsSwitch.setOnCheckedChangeListener { _, isChecked ->
+        pemButton.visibility = if (isChecked) {
+
+            keymode = true
+            writeBooleanToFile(keymode, "pairsSwitchState.txt")
+            Button.VISIBLE
+
+        } else {
+            keymode = false
+            writeBooleanToFile(keymode, "pairsSwitchState.txt")
+            Button.INVISIBLE
+        }
+    }
+    pemButton.setOnClickListener {
+        openKeyFilePicker()
 
     }
 
+    val videoSwitch: Switch = findViewById(R.id.video)
+    videoSwitch.isChecked = sharedPreferences.getBoolean("videoSwitchState", false)
+    videoSwitch.setOnCheckedChangeListener { _, isChecked ->
+        sharedPreferences.edit().putBoolean("videoSwitchState", isChecked).apply()
 
+        video = isChecked
+
+        writeBooleanToFile(video, "videoSwitchState.txt")
+
+    }
+    val privateSwitch: Switch = findViewById(R.id.privatemode)
+    privateSwitch.isChecked = sharedPreferences.getBoolean("privateSwitchState", false)
+
+    privateSwitch.setOnCheckedChangeListener { _, isChecked ->
+        // Update the switch state in the shared preferences based on the current state
+        sharedPreferences.edit().putBoolean("privateSwitchState", isChecked).apply()
+
+        // Set the privatemode variable accordingly
+        privatemode = isChecked
+
+        // Write the new state to the file
+        writeBooleanToFile(isChecked, "privateSwitchState.txt")
+        privatemode = readBooleanFromFile("privateSwitchState.txt")
+        if (privatemode) {
+            privateSwitch.setTextColor(Color.GREEN)
+        } else {
+            privateSwitch.setTextColor(Color.parseColor("#A7A2A9"))
+        }
+    }
+
+
+
+    findViewById<ImageView>(R.id.gallery)?.apply {
+        setOnClickListener {
+            openFilePickerForUpload()
+        }
+    }
+    val listbutton = findViewById<Button>(R.id.buttonlist)
+    listbutton.setOnClickListener {
+        if (keymode) {
+            if (lastkey.isNullOrBlank()) {
+                show("Select a Private Key")
+            } else {
+                listwithkey()
+            }
+        } else {
+            listwithoutkey()
+        }
+    }
+
+    // Call the biometric authentication method
+}
+
+    private fun authenticateUser() {
+        val biometricManager = BiometricManager.from(this)
+        when (biometricManager.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG)) {
+            BiometricManager.BIOMETRIC_SUCCESS -> {
+                // Device can authenticate with biometrics
+                showBiometricPrompt()
+            }
+            else -> {
+                // Device cannot authenticate with biometrics
+                show("No biometrics available on this device")
+            }
+        }
+    }
+
+    private fun showBiometricPrompt() {
+        val executor = ContextCompat.getMainExecutor(this)
+        val biometricPrompt = BiometricPrompt(this, executor, object : BiometricPrompt.AuthenticationCallback() {
+            override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                super.onAuthenticationError(errorCode, errString)
+                //unblurScreen() // Unblur the screen on error
+                finish() // Close the app on error
+            }
+
+            override fun onAuthenticationFailed() {
+                super.onAuthenticationFailed()
+                //unblurScreen() // Unblur the screen on failure
+                finish() // Close the app on failure
+            }
+
+            override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                super.onAuthenticationSucceeded(result)
+                shouldRequestBiometric = false
+                unblurScreen() // Unblur the screen on success
+            }
+        })
+
+        val promptInfo = BiometricPrompt.PromptInfo.Builder()
+            .setTitle("Biometric Authentication")
+            .setSubtitle("Authenticate to access the app")
+            .setNegativeButtonText("Cancel")
+            .build()
+
+        // Blur the screen when the prompt is shown
+        blurScreen()
+        biometricPrompt.authenticate(promptInfo)
+    }
+
+    private fun blurScreen() {
+        val view = window.decorView
+        view.alpha = 0f // Adjust the alpha value to create a blur effect
+    }
+
+    private fun unblurScreen (){
+        val view = window.decorView
+        view.alpha = 1f
+    }
 
     fun listwithkey() {
         progressBar.visibility = ProgressBar.VISIBLE
@@ -1017,7 +1100,8 @@ privatemode = readBooleanFromFile("privateSwitchState.txt")
 
     override fun onPause() {
         super.onPause()
-
+        blurScreen()
+        shouldRequestBiometric = true
         val editor = sharedPreferences.edit()
         val fields = arrayOf(username, password, hostname, port, remoteFilePath)
         val keys = arrayOf("username", "password", "hostname", "port", "remoteFilePath")
@@ -1076,7 +1160,7 @@ privatemode = readBooleanFromFile("privateSwitchState.txt")
 takeAndHandleMedia(isVideo,privatemode)
 
     }}
-//SAVE THE MEDIA TO APP (CURRENTLY IN MP4 or JPG)
+//SAVE THE MEDIA TO APP (CURRENTLY IN .MP4 or .JPG ONLY)
     @SuppressLint("QueryPermissionsNeeded")
     fun takeAndHandleMedia(isVideo: Boolean, privatemode: Boolean) {
         val storageDir = File("${filesDir}/Storage")
@@ -1085,11 +1169,12 @@ takeAndHandleMedia(isVideo,privatemode)
         if (!storageDir.exists()) {
             storageDir.mkdirs()
         }
+    // Get the current date and time
         val date = LocalDateTime.now()
         val formatter = java.time.format.DateTimeFormatter.ofPattern("HHmmss_dd-MM-yyyy")
         val datetime = date.format(formatter)
 
-        val extension = if (isVideo) ".mp4" else ".jpg"
+        val extension = if (isVideo) ".mp4" else ".jpg" //This may need updating to support other file types in the future
         val filename = "$datetime$extension"//"$datetime$extension"
 
         val intent = if (isVideo) Intent(MediaStore.ACTION_VIDEO_CAPTURE) else Intent(MediaStore.ACTION_IMAGE_CAPTURE)
@@ -1811,10 +1896,17 @@ takeAndHandleMedia(isVideo,privatemode)
         }
         return true
     }
-    fun requestPermissions() {
+    private fun requestPermissions() {
         requestPermissionLauncher.launch(permissions)
+
     }
 
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus && shouldRequestBiometric) {authenticateUser()
+        }
+
+    }
     override fun onDestroy() {
         super.onDestroy()
         // Clear the FLAG_KEEP_SCREEN_ON flag when the activity is destroyed

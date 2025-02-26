@@ -38,19 +38,6 @@
         app:layout_constraintStart_toStartOf="@+id/editTextRemoteFilePath"
         app:layout_constraintTop_toBottomOf="@+id/privatemode" />
 
-    <Switch
-        android:id="@+id/video"
-        android:layout_width="145dp"
-        android:layout_height="25dp"
-        android:text="Image / Video"
-        android:textAlignment="center"
-        android:textAllCaps="false"
-        android:textAppearance="@style/TextAppearance.AppCompat.Body2"
-        android:textColor="#A7A2A9"
-        app:layout_constraintBottom_toTopOf="@+id/progressBarHorizontal"
-        app:layout_constraintStart_toStartOf="@+id/editTextRemoteFilePath"
-        app:layout_constraintTop_toBottomOf="@+id/pairs" />
-
     <ImageView
         android:id="@+id/preview"
         android:layout_width="400dp"
@@ -103,8 +90,9 @@
     <EditText
         android:id="@+id/editTextUsername"
         android:layout_width="300dp"
-        android:layout_height="45dp"
+        android:layout_height="0dp"
         android:layout_marginStart="8dp"
+        android:layout_marginBottom="613dp"
         android:autoText="false"
         android:hint="Username"
         android:inputType="textNoSuggestions"
@@ -335,6 +323,35 @@
         android:textSize="14dp"
         app:layout_constraintEnd_toEndOf="@+id/pem"
         app:layout_constraintTop_toBottomOf="@+id/editTextRemoteFilePath" />
+
+    <com.google.android.material.floatingactionbutton.FloatingActionButton
+        android:id="@+id/settings"
+        style="@style/Widget.Design.FloatingActionButton"
+        android:layout_width="48dp"
+        android:layout_height="wrap_content"
+        android:accessibilityHeading="false"
+        android:background="@android:color/transparent"
+        android:clickable="true"
+        android:cropToPadding="true"
+        android:foreground="@drawable/cog__web_fundamentals"
+        android:hapticFeedbackEnabled="true"
+        app:backgroundTint="@android:color/transparent"
+        app:backgroundTintMode="add"
+        app:layout_constraintBottom_toBottomOf="@+id/gallery"
+        tools:layout_editor_absoluteX="8dp" />
+
+    <Switch
+        android:id="@+id/video"
+        android:layout_width="145dp"
+        android:layout_height="25dp"
+        android:text="Image / Video"
+        android:textAlignment="center"
+        android:textAllCaps="false"
+        android:textAppearance="@style/TextAppearance.AppCompat.Body2"
+        android:textColor="#A7A2A9"
+        app:layout_constraintBottom_toTopOf="@+id/progressBarHorizontal"
+        app:layout_constraintStart_toStartOf="@+id/editTextRemoteFilePath"
+        app:layout_constraintTop_toBottomOf="@+id/pairs" />
 
 
 </androidx.constraintlayout.widget.ConstraintLayout>

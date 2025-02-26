@@ -68,7 +68,7 @@ class CameraActivity : AppCompatActivity() {
 
         private const val KNOWN_HOSTS_KEY = "known_hosts"
     }
-
+//DECLARE VARIABLES
     var sftpChannel: ChannelSftp? = null // Reference to the SFTP channel
     lateinit var knownHosts: String
     var latestTmpFileUri: Uri? = null
@@ -187,7 +187,7 @@ class CameraActivity : AppCompatActivity() {
 
 
 
-
+//DISPLAY PREVIEW OF VIDEO FROM URI
     fun getVideoFrameAtTime(context: Context, videoUri: Uri): Bitmap? {
         var bitmap: Bitmap? = null
         try {
@@ -206,7 +206,7 @@ class CameraActivity : AppCompatActivity() {
         return bitmap
     }
 
-// END OF IMAGE CAPTURE START OF DISPLAY PREVIEW IMAGE FROM URI
+// START OF DISPLAY PREVIEW IMAGE FROM URI
 
     @SuppressLint("UseCompatLoadingForDrawables")
     fun imageuriToBitmap(uri: Uri): Bitmap? {
@@ -257,6 +257,8 @@ class CameraActivity : AppCompatActivity() {
             false // Default value if file does not exist
         }
     }
+    //SHOW A PREVIEW IMAGE "TYPE" FOR GENERIC FILE UPLOAD
+    //DOCUMENTS, AUDIO, AND ARCHIVES ETC.
     @SuppressLint("UseCompatLoadingForDrawables")
     fun getImageFromUri(context: Context, uri: Uri): Bitmap? {
         progressBarHorizontal.progress = 0
@@ -348,7 +350,7 @@ class CameraActivity : AppCompatActivity() {
             }
     }
 
-
+//ROTATE THE PREVIEW IF NECESSARY
     fun rotateBitmap(bitmap: Bitmap, degrees: Float): Bitmap {
         val matrix = android.graphics.Matrix()
         matrix.postRotate(degrees)
@@ -365,7 +367,7 @@ class CameraActivity : AppCompatActivity() {
             }
         }
 
-
+//GET FILE EXTENSION FROM URI BASED ON LAST INDEX OF DOT CHARACTER
     fun getFileExtension(uri: Uri): String {
         val path = uri.path ?: return ""
         val lastIndexOfDot = path.lastIndexOf('.')
@@ -376,14 +378,7 @@ class CameraActivity : AppCompatActivity() {
         }
     }
 
-    fun formatFileSize(size: Long): String {
-        if (size <= 0) return "0 B"
-        val units = arrayOf("B", "KB", "MB", "GB", "TB")
-        val digitGroups = (Math.log10(size.toDouble()) / Math.log10(1024.0)).toInt()
-        val df = DecimalFormat("#.##")
-        return df.format(size / Math.pow(1024.0, digitGroups.toDouble())) + " " + units[digitGroups]
-    }
-
+    //GET FILE SIZE FROM URI
 
     fun getFileSize(context: Context, uri: Uri): Long {
         var fileSize: Long = 0
@@ -410,6 +405,17 @@ class CameraActivity : AppCompatActivity() {
 
         return fileSize
     }
+
+//FORMAT THE FILE SIZE OF THE FILE TO BE EASILY READABLE BY THE USER
+    fun formatFileSize(size: Long): String {
+        if (size <= 0) return "0 B"
+        val units = arrayOf("B", "KB", "MB", "GB", "TB")
+        val digitGroups = (Math.log10(size.toDouble()) / Math.log10(1024.0)).toInt()
+        val df = DecimalFormat("#.##")
+        return df.format(size / Math.pow(1024.0, digitGroups.toDouble())) + " " + units[digitGroups]
+    }
+
+
 
     // START OF FILE FOR UPLOAD SELECTOR AND AUTO UPLOAD
     @SuppressLint("UseSwitchCompatOrMaterialCode")
@@ -461,7 +467,7 @@ class CameraActivity : AppCompatActivity() {
             }
         }
 
-    // Gets filename and extension from the URI
+    // GET FILENAME AND EXTENSION FROM URI
     @SuppressLint("Range")
     fun getFileName(uri: Uri): String {
         var result = ""
@@ -482,7 +488,7 @@ class CameraActivity : AppCompatActivity() {
         }
         return result
     }
-
+//ON CREATE ACTIONS
     @SuppressLint("WrongViewCast", "UseSwitchCompatOrMaterialCode", "SuspiciousIndentation")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -557,7 +563,7 @@ class CameraActivity : AppCompatActivity() {
             }
         }
         pemButton.setOnClickListener {
-            openFilePicker()
+            openKeyFilePicker()
 
         }
 
@@ -681,6 +687,7 @@ privatemode = readBooleanFromFile("privateSwitchState.txt")
 
     }
 
+    //CONFIRM TO LIST OF THE CURRENT FOLDERS CONTENTS - USING A KEY
     private fun listhostKeyConfirmationwithkey(
         user: String,
         host: String,
@@ -713,7 +720,7 @@ privatemode = readBooleanFromFile("privateSwitchState.txt")
                 .show()
         }
     }
-
+//DOWNLOAD LIST OF THE CURRENT FOLDERS CONTENTS - USING A KEY
     private fun downloadlistwithkey(user: String, host: String, port: Int, lastkey: String) {
         val folderPath = remoteFilePath.text.toString()
 
@@ -757,7 +764,7 @@ privatemode = readBooleanFromFile("privateSwitchState.txt")
         }.start()
     }
 
-
+//GET FINGERPRINT FROM SERVER FOR OF THE CURRENT FOLDERS CONTENTS - WITHOUT A KEY
     fun listwithoutkey() {
         progressBar.visibility = ProgressBar.VISIBLE
         val user = username.text.toString()
@@ -773,7 +780,7 @@ privatemode = readBooleanFromFile("privateSwitchState.txt")
 
             return
         }
-
+//Ensure there is a username
         if (user.isBlank()) {
             show("Please enter Username")
             progressBar.visibility = ProgressBar.INVISIBLE
@@ -781,14 +788,14 @@ privatemode = readBooleanFromFile("privateSwitchState.txt")
             return
 
         }
-
+//Ensure there is a password
         if (password.isBlank()) {
             show("Please enter Password")
             progressBar.visibility = ProgressBar.INVISIBLE
 
             return
         }
-
+//Ensure there is a server address
         if (host.isBlank()) {
             show("Please enter Server Address")
             progressBar.visibility = ProgressBar.INVISIBLE
@@ -797,7 +804,7 @@ privatemode = readBooleanFromFile("privateSwitchState.txt")
         }
         
 
-
+//Establish SSH connection and retrieve server fingerprint
         runBlocking {
             launch(Dispatchers.IO) {
                 try {
@@ -863,7 +870,7 @@ privatemode = readBooleanFromFile("privateSwitchState.txt")
         }
     }
 
-
+//DOWNLOAD LIST OF THE CURRENT FOLDERS CONTENTS - WITHOUT A KEY
     @SuppressLint("SuspiciousIndentation")
     fun downloadlistwithoutkey(
         user: String,
@@ -911,6 +918,8 @@ privatemode = readBooleanFromFile("privateSwitchState.txt")
 
         }.start()
     }
+    //PARSE THE RETRIEVED LIST SO AS TO DISPLAY THE CONTENTS OF THE FOLDER IN HTML FORMAT
+    @SuppressLint("SimpleDateFormat")
     private fun parseFileEntry(entry: ChannelSftp.LsEntry): String {
         val fileName = entry.filename
 
@@ -930,7 +939,7 @@ privatemode = readBooleanFromFile("privateSwitchState.txt")
 
         return firstLine
     }
-
+//SHOW THE RETRIEVED LIST IN HTML FORMAT
     private fun showlisthtml(firstLine: String) {
         val listdialog = AlertDialog.Builder(this@CameraActivity, R.style.CustomAlertDialogList)
             .setTitle("Directory Information")
@@ -946,8 +955,8 @@ privatemode = readBooleanFromFile("privateSwitchState.txt")
 
 
 
-
-    fun openFilePicker() {
+//OPEN FILE PICKER FOR PRIVATE KEY
+    fun openKeyFilePicker() {
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
             type = "*/*" // Accept all MIME types
@@ -961,7 +970,7 @@ privatemode = readBooleanFromFile("privateSwitchState.txt")
         }
         pickPemFileLauncher.launch(intent)
     }
-
+//OPEN FILE PICKER FOR UPLOAD OF GENERIC FILE
     fun openFilePickerForUpload() {
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
@@ -969,7 +978,7 @@ privatemode = readBooleanFromFile("privateSwitchState.txt")
         }
         pickFileForUploadLauncher.launch(intent)
     }
-
+//PROCESS THE RETRIEVED PRIVATE KEY
     fun handlePemFile(uri: Uri) {
         contentResolver.openInputStream(uri)?.use { inputStream ->
             val reader = BufferedReader(InputStreamReader(inputStream))
@@ -997,7 +1006,7 @@ privatemode = readBooleanFromFile("privateSwitchState.txt")
             alertDialog.show()
         }
     }
-
+//LOAD THE SAVED ENTRIES FROM SHARED PREFERENCES AND DISPLAY THEM IN THE FIELDS OF THE ACTIVITY
     fun loadSavedEntries() {
         val fields = arrayOf(username, password, hostname, port, remoteFilePath)
         val keys = arrayOf("username", "password", "hostname", "port", "remoteFilePath")
@@ -1020,6 +1029,7 @@ privatemode = readBooleanFromFile("privateSwitchState.txt")
         editor.putString(KNOWN_HOSTS_KEY, knownHosts)
         editor.apply()
     }
+    //SAVE THE MEDIA TO DEVICE (CURRENTLY IN MP4 or JPG)
     fun takeMedia(isVideo: Boolean, privatemode: Boolean) {
         val date = LocalDateTime.now()
         val formatter = java.time.format.DateTimeFormatter.ofPattern("HHmmss_dd-MM-yyyy")
@@ -1066,7 +1076,8 @@ privatemode = readBooleanFromFile("privateSwitchState.txt")
 takeAndHandleMedia(isVideo,privatemode)
 
     }}
-
+//SAVE THE MEDIA TO APP (CURRENTLY IN MP4 or JPG)
+    @SuppressLint("QueryPermissionsNeeded")
     fun takeAndHandleMedia(isVideo: Boolean, privatemode: Boolean) {
         val storageDir = File("${filesDir}/Storage")
 
@@ -1096,7 +1107,7 @@ takeAndHandleMedia(isVideo,privatemode)
     }
 
 
-
+//UPLOAD FILE TO SERVER WITH USERNAME AND PASSWORD AS AUTH
     fun uploadFILEToServer(uri: Uri) {
         progressBar.visibility = ProgressBar.VISIBLE
         val user = username.text.toString()
@@ -1177,7 +1188,7 @@ takeAndHandleMedia(isVideo,privatemode)
         }
     }
 
-
+//UPLOAD FILE TO SERVER WITH PRIVATE KEY AS AUTH
     fun uploadFILEToServerWithAuthMethod(
         uri: Uri,
         privateKey: String
@@ -1254,6 +1265,7 @@ takeAndHandleMedia(isVideo,privatemode)
         }
     }
 
+    //SHOW THE DIALOG BOX FOR HOST KEY CONFIRMATION WITH USERNAME AND PASSWORD AS AUTH
     fun hostKeyConfirmation(
         user: String,
         host: String,
@@ -1281,7 +1293,7 @@ takeAndHandleMedia(isVideo,privatemode)
                 .show()
         }
     }
-
+//SHOW THE DIALOG BOX FOR HOST KEY CONFIRMATION WITH PRIVATE KEY AS AUTH
     fun hostKeyConfirmationWithPrivateKey(
         imageUri: Uri,
         user: String,
@@ -1314,7 +1326,7 @@ takeAndHandleMedia(isVideo,privatemode)
                 .show()
         }
     }
-
+//ESTABLISH SSH CONNECTION USER USERNAME - WITHOUT PRIVATE KEY
     fun establishSSHConnection(
         user: String,
         host: String,
@@ -1323,7 +1335,6 @@ takeAndHandleMedia(isVideo,privatemode)
     ): Session? {
         val jsch = JSch()
         val session = jsch.getSession(user, host, port)
-        //session.setPassword(password)
         session.setConfig("StrictHostKeyChecking", "ask")
         try {
             session.connect()
@@ -1333,7 +1344,7 @@ takeAndHandleMedia(isVideo,privatemode)
             throw e
         }
     }
-
+//ESTABLISH SSH CONNECTION USER USERNAME - WITH PRIVATE KEY
     private fun establishSSHConnectionWithPrivateKey(
         user: String,
         host: String,
@@ -1343,7 +1354,6 @@ takeAndHandleMedia(isVideo,privatemode)
         val jsch = JSch()
         val session = jsch.getSession(user, host, port)
 
-        //jsch.addIdentity("key", privateKey.toByteArray(), null, null)
         session.setConfig("StrictHostKeyChecking", "ask")
         try {
             session.connect()
@@ -1353,7 +1363,7 @@ takeAndHandleMedia(isVideo,privatemode)
             throw e
         }
     }
-
+// ESTABLISH SSH CONNECTION AND UPLOAD USING USERNAME AND PASSWORD - WITHOUT PRIVATE KEY
     @OptIn(DelicateCoroutinesApi::class)
     fun establishSSHConnectionAndUploadWithoutPrivateKey(
         imageUri: Uri,
@@ -1500,7 +1510,7 @@ takeAndHandleMedia(isVideo,privatemode)
 
         }
     }
-
+// ESTABLISH SSH CONNECTION AND UPLOAD USING USERNAME - WITH PRIVATE KEY
     @OptIn(DelicateCoroutinesApi::class)
     fun establishSSHConnectionAndUploadWithPrivateKey(
         imageUri: Uri,
@@ -1648,6 +1658,7 @@ takeAndHandleMedia(isVideo,privatemode)
     private val channelId = "CloudyCam"
     private val channelName = "CloudyCam"
 
+    //THE NOTIFICATION BAR ON THE LOCK SCREEN
     fun shownotifyfail( message: String) {
         val notificationId = 1 // You can use any unique ID for the notification
         val notificationIntent = Intent(this, CameraActivity::class.java)
@@ -1786,7 +1797,7 @@ takeAndHandleMedia(isVideo,privatemode)
         notificationManager.notify(notificationId, notification)
     }
 
-
+// A function to simplify the toast messages
     fun show(message: String) {
         Toast.makeText(this, message, Toast.LENGTH_LONG).show()
     }

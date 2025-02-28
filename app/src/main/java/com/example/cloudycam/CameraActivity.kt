@@ -94,6 +94,7 @@ class CameraActivity : AppCompatActivity() {
     var video: Boolean = false
     var privatemode: Boolean = false
     var filename: String = ""
+    var BiometricEnabled = true
     private var shouldRequestBiometric = true
 
 
@@ -641,6 +642,11 @@ class CameraActivity : AppCompatActivity() {
     }
 
     // Call the biometric authentication method
+
+    // Find the settings button and set an OnClickListener
+    findViewById<Button>(R.id.settings)?.setOnClickListener {
+        showBiometricSettingsDialog()
+    }
 }
 
     private fun authenticateUser() {
@@ -1911,6 +1917,27 @@ takeAndHandleMedia(isVideo,privatemode)
         super.onDestroy()
         // Clear the FLAG_KEEP_SCREEN_ON flag when the activity is destroyed
         window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+    }
+
+    private fun showBiometricSettingsDialog() {
+        val dialogView = layoutInflater.inflate(R.layout.dialog_biometric_settings, null)
+        val biometricSwitch = dialogView.findViewById<Switch>(R.id.switch_biometric)
+
+        // Load the saved state of the biometric switch
+        biometricSwitch.isChecked = sharedPreferences.getBoolean("BiometricEnabled", true)
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Biometric Authentication Settings")
+            .setView(dialogView)
+            .setPositiveButton("OK") { _, _ ->
+                // Save the state of the switch
+                BiometricEnabled = biometricSwitch.isChecked
+                sharedPreferences.edit().putBoolean("BiometricEnabled", BiometricEnabled).apply()
+            }
+            .setNegativeButton("Cancel", null)
+            .create()
+
+        dialog.show()
     }
 }
 

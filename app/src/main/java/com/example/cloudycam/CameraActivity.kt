@@ -14,6 +14,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
 import android.provider.MediaStore
+import android.view.WindowManager
 import android.widget.Button
 import android.widget.EditText
 import android.widget.ImageView
@@ -40,7 +41,6 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
 import android.view.View
-import android.view.WindowManager
 import android.widget.TextView
 import androidx.core.graphics.drawable.toBitmap
 import androidx.exifinterface.media.ExifInterface
@@ -53,8 +53,6 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.graphics.Color
 import android.os.Build
-import android.os.Handler
-import android.os.Looper
 import android.text.Html
 import android.widget.RemoteViews
 import androidx.core.app.NotificationCompat
@@ -63,7 +61,13 @@ import java.text.SimpleDateFormat
 import java.util.*
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
-
+import com.google.android.material.floatingactionbutton.FloatingActionButton
+import com.google.android.material.switchmaterial.SwitchMaterial
+import android.util.Log
+import android.os.Environment
+import androidx.lifecycle.lifecycleScope
+import com.example.cloudycam.databinding.ActivityMainBinding
+import kotlinx.coroutines.withContext
 
 
 //END OF IMPORTS START OF VARIABLES
@@ -73,11 +77,12 @@ class CameraActivity : AppCompatActivity() {
 
         private const val KNOWN_HOSTS_KEY = "known_hosts"
     }
-//DECLARE VARIABLES
+
+    //DECLARE VARIABLES
     var sftpChannel: ChannelSftp? = null // Reference to the SFTP channel
     lateinit var knownHosts: String
     var latestTmpFileUri: Uri? = null
-    var snap: Uri? = null
+    private var snapshot: Uri? = null
     lateinit var username: EditText
     lateinit var password: EditText
     lateinit var hostname: EditText
@@ -94,8 +99,12 @@ class CameraActivity : AppCompatActivity() {
     var video: Boolean = false
     var privatemode: Boolean = false
     var filename: String = ""
-    var BiometricEnabled = true
+    var BiometricEnabled = false
     private var shouldRequestBiometric = true
+    private var failedAttempts = 0
+    private val maxFailedAttempts = 5
+    private var isMainLayoutShown = false
+    private lateinit var binding: ActivityMainBinding
 
 
     //END OF VARIABLES START OF PERMISSION CHECK
@@ -134,58 +143,33 @@ class CameraActivity : AppCompatActivity() {
 
     private val takeMediaResult =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-            if (result.resultCode == Activity.RESULT_OK && privatemode) {
-                //authenticateUser()
-                latestTmpFileUri = snap
-
-                // Image capture was successful
-                latestTmpFileUri?.let { uri ->
-                    findViewById<Button>(R.id.button_upload)?.apply {
-                        visibility = Button.VISIBLE
-                    }
-                    findViewById<ImageView>(R.id.preview)?.apply {
-                        visibility = ImageView.VISIBLE
-                        setImageBitmap(getImageFromUri(context, uri))
-
-                        val internaldir = File ("$filesDir/Storage")
-                        val filenametokeep = getFileName(snap!!)
-                        deleteFilesExcept(filenametokeep, internaldir)
-
-
-
-                    }}}else{
             if (result.resultCode == Activity.RESULT_OK) {
-               // authenticateUser()
-                latestTmpFileUri = snap
-                // Image capture was successful
-                latestTmpFileUri?.let { uri ->
-                    findViewById<Button>(R.id.button_upload)?.apply {
-                        visibility = Button.VISIBLE
-                    }
-                    findViewById<ImageView>(R.id.preview)?.apply {
-                        visibility = ImageView.VISIBLE
-                        (setImageBitmap(getImageFromUri(context, uri)))
+                // Handle successful capture
+                snapshot = result.data?.data ?: latestTmpFileUri
+                latestTmpFileUri = snapshot // Ensure latestTmpFileUri is updated
+
+                // Display the captured image if snapshot is available
+                snapshot?.let { uri ->
+                    getImageFromUri(this, uri)?.let { bitmap ->
+                        binding.preview.apply {
+                            setImageBitmap(bitmap)
+                        }
                     }
                 }
-             } else {            if (result.resultCode == Activity.RESULT_CANCELED && !privatemode) {
-                // Image capture was not successful (e.g., canceled or failed)
-                //authenticateUser()
-                show("Capture canceled.")
-                contentResolver.delete(snap!!, null, null)
-                snap = null
-
-
-            }else { authenticateUser()
-                show("Capture canceled.")
+            } else if (result.resultCode == Activity.RESULT_CANCELED) {
+                runOnUiThread {
+                    show("Media capture canceled.")
+                }
+            } else {
+                show("Unexpected result code: ${result.resultCode}")
             }
-            }
+            isMainLayoutShown = true // Set to true when media capture is completed or canceled
+            shouldRequestBiometric = true
         }
 
+    // Decode and display bitmap using coroutines
+    
 
-
-
-
-        }
     fun deleteFilesExcept(filenameToKeep: String, directory: File) {
         if (!directory.exists() || !directory.isDirectory) {
             // Directory doesn't exist or is not a directory, nothing to delete
@@ -203,8 +187,7 @@ class CameraActivity : AppCompatActivity() {
     }
 
 
-
-//DISPLAY PREVIEW OF VIDEO FROM URI
+    //DISPLAY PREVIEW OF VIDEO FROM URI
     fun getVideoFrameAtTime(context: Context, videoUri: Uri): Bitmap? {
         var bitmap: Bitmap? = null
         try {
@@ -228,36 +211,64 @@ class CameraActivity : AppCompatActivity() {
     @SuppressLint("UseCompatLoadingForDrawables")
     fun imageuriToBitmap(uri: Uri): Bitmap? {
         return try {
-            val inputStream = contentResolver.openInputStream(uri)
-            inputStream?.use { input ->
-                // Decode bitmap with BitmapFactory without considering orientation
-                val options = BitmapFactory.Options()
+            // Open the input stream once and use it for both decoding bounds and the actual bitmap
+            contentResolver.openInputStream(uri)?.use { inputStream ->
+                val options = BitmapFactory.Options().apply {
+                    inJustDecodeBounds = true
+                }
+                // Decode bounds to get image dimensions
+                BitmapFactory.decodeStream(inputStream, null, options)
+
+                // Calculate inSampleSize
+                options.inSampleSize = calculateInSampleSize(options, 600, 600)
                 options.inJustDecodeBounds = false
                 options.inPreferredConfig = Bitmap.Config.ARGB_8888
                 options.inMutable = true
-                var bitmap = BitmapFactory.decodeStream(input, null, options)
 
-                // Check the orientation of the image
-                val exif = ExifInterface(contentResolver.openInputStream(uri)!!)
-                val orientation = exif.getAttributeInt(
-                    ExifInterface.TAG_ORIENTATION,
-                    ExifInterface.ORIENTATION_UNDEFINED
-                )
-                // Rotate the bitmap if necessary
-                bitmap = when (orientation) {
-                    ExifInterface.ORIENTATION_ROTATE_90 -> bitmap?.let { rotateBitmap(it, 90f) }
-                    ExifInterface.ORIENTATION_ROTATE_180 -> bitmap?.let { rotateBitmap(it, 180f) }
-                    ExifInterface.ORIENTATION_ROTATE_270 -> bitmap?.let { rotateBitmap(it, 270f) }
-                    else -> bitmap
+                // Reopen the input stream for actual bitmap decoding
+                contentResolver.openInputStream(uri)?.use { newInputStream ->
+                    var bitmap = BitmapFactory.decodeStream(newInputStream, null, options)
+
+                    // Check the orientation of the image
+                    contentResolver.openInputStream(uri)?.use { exifInputStream ->
+                        val exif = ExifInterface(exifInputStream)
+                        val orientation = exif.getAttributeInt(
+                            ExifInterface.TAG_ORIENTATION,
+                            ExifInterface.ORIENTATION_UNDEFINED
+                        )
+                        // Rotate the bitmap if necessary
+                        bitmap = when (orientation) {
+                            ExifInterface.ORIENTATION_ROTATE_90 -> bitmap?.let { rotateBitmap(it, 90f) }
+                            ExifInterface.ORIENTATION_ROTATE_180 -> bitmap?.let { rotateBitmap(it, 180f) }
+                            ExifInterface.ORIENTATION_ROTATE_270 -> bitmap?.let { rotateBitmap(it, 270f) }
+                            else -> bitmap
+                        }
+                    }
+                    bitmap
                 }
-                bitmap
             }
         } catch (e: Exception) {
             e.printStackTrace()
             null
-
         }
     }
+
+    fun calculateInSampleSize(options: BitmapFactory.Options, reqWidth: Int, reqHeight: Int): Int {
+        val (height: Int, width: Int) = options.run { outHeight to outWidth }
+        var inSampleSize = 1
+
+        if (height > reqHeight || width > reqWidth) {
+            val reducedHeight: Int = height / 8
+            val reducedWidth: Int = width / 8
+
+            while (reducedHeight / inSampleSize >= reqHeight && reducedWidth / inSampleSize >= reqWidth) {
+                inSampleSize *= 8
+            }
+        }
+
+        return inSampleSize
+    }
+
     // Function to write boolean value to a file
     fun writeBooleanToFile(value: Boolean, fileName: String) {
         val file = File("${filesDir}$fileName")
@@ -274,6 +285,13 @@ class CameraActivity : AppCompatActivity() {
             false // Default value if file does not exist
         }
     }
+
+    // Function to determine if the latestTmpFileUri is stored in the specified internal storage path
+    private fun isStoredInInternalStorage(uri: Uri): Boolean {
+        val isInternal = uri.path?.startsWith("/internal_files/") == true
+        return isInternal
+    }
+
     //SHOW A PREVIEW IMAGE "TYPE" FOR GENERIC FILE UPLOAD
     //DOCUMENTS, AUDIO, AND ARCHIVES ETC.
     @SuppressLint("UseCompatLoadingForDrawables")
@@ -282,12 +300,19 @@ class CameraActivity : AppCompatActivity() {
         latestTmpFileUri = uri
         val mimeType = context.contentResolver.getType(uri)
         val filename = getFileName(uri)
-        val fileNameTextView = findViewById<TextView>(R.id.progresstext)
+        val fileNameTextView = binding.progresstext
         filesizeformatted = formatFileSize(getFileSize(this, latestTmpFileUri!!))
         filesizeinbytes = getFileSize(this, latestTmpFileUri!!)
-        val monkey = if(privatemode) {"PRIVATE 🙈 "} else {""}
+        val monkey = if (isStoredInInternalStorage(uri)) {
+            "PRIVATE 🙈 "
+        } else {
+            ""
+        }
         val progressText = "$monkey$filename $filesizeformatted"
-        fileNameTextView.text = progressText
+        if (filesizeformatted.endsWith("0 B",false))
+            {
+        fileNameTextView.text =""}
+        else{fileNameTextView.text = progressText}
         return if (filename.contains(".jpg", true) || filename.contains(
                 ".jpeg",
                 true
@@ -367,7 +392,7 @@ class CameraActivity : AppCompatActivity() {
             }
     }
 
-//ROTATE THE PREVIEW IF NECESSARY
+    //ROTATE THE PREVIEW IF NECESSARY
     fun rotateBitmap(bitmap: Bitmap, degrees: Float): Bitmap {
         val matrix = android.graphics.Matrix()
         matrix.postRotate(degrees)
@@ -384,7 +409,7 @@ class CameraActivity : AppCompatActivity() {
             }
         }
 
-//GET FILE EXTENSION FROM URI BASED ON LAST INDEX OF DOT CHARACTER
+    //GET FILE EXTENSION FROM URI BASED ON LAST INDEX OF DOT CHARACTER
     fun getFileExtension(uri: Uri): String {
         val path = uri.path ?: return ""
         val lastIndexOfDot = path.lastIndexOf('.')
@@ -423,15 +448,15 @@ class CameraActivity : AppCompatActivity() {
         return fileSize
     }
 
-//FORMAT THE FILE SIZE OF THE FILE TO BE EASILY READABLE BY THE USER
+
+    //FORMAT THE FILE SIZE OF THE FILE TO BE EASILY READABLE BY THE USER
     fun formatFileSize(size: Long): String {
-        if (size <= 0) return "0 B"
+        if (size <= 0){return "0 B"}
         val units = arrayOf("B", "KB", "MB", "GB", "TB")
         val digitGroups = (Math.log10(size.toDouble()) / Math.log10(1024.0)).toInt()
         val df = DecimalFormat("#.##")
         return df.format(size / Math.pow(1024.0, digitGroups.toDouble())) + " " + units[digitGroups]
     }
-
 
 
     // START OF FILE FOR UPLOAD SELECTOR AND AUTO UPLOAD
@@ -442,7 +467,7 @@ class CameraActivity : AppCompatActivity() {
                 result.data?.data?.let { uri ->
                     extension = getFileExtension(uri)
                     filename = getFileName(uri)
-                    findViewById<ImageView>(R.id.preview)?.apply {
+                    binding.preview.apply {
                         visibility = ImageView.VISIBLE
                         setImageBitmap(getImageFromUri(context, uri))
 
@@ -505,206 +530,330 @@ class CameraActivity : AppCompatActivity() {
         }
         return result
     }
-//ON CREATE ACTIONS
+
+    //ON CREATE ACTIONS
     @SuppressLint("WrongViewCast", "UseSwitchCompatOrMaterialCode", "SuspiciousIndentation")
     override fun onCreate(savedInstanceState: Bundle?) {
-    super.onCreate(savedInstanceState)
+        super.onCreate(savedInstanceState)
+        binding = ActivityMainBinding.inflate(layoutInflater)
+        setContentView(binding.root)
 
-    setContentView(R.layout.activity_main)
-    createNotificationChannel()
-    username = findViewById(R.id.editTextUsername)
-    password = findViewById(R.id.editTextPassword)
-    hostname = findViewById(R.id.editTextHostname)
-    port = findViewById(R.id.editTextPort)
-    remoteFilePath = findViewById(R.id.editTextRemoteFilePath)
-    progressBar = findViewById(R.id.progressBar)
-    progressBarHorizontal = findViewById(R.id.progressBarHorizontal)
-    sharedPreferences = getSharedPreferences("com.example.cloudycam", Context.MODE_PRIVATE)
-    knownHosts = sharedPreferences.getString(KNOWN_HOSTS_KEY, "") ?: ""
-
-
-    loadSavedEntries()
-    if (!arePermissionsGranted()) {
-        requestPermissions()
-    } else {
-        video = readBooleanFromFile("videoSwitchState.txt")
-        privatemode = readBooleanFromFile("privateSwitchState.txt")
-        val privateSwitch: Switch = findViewById(R.id.privatemode)
-        if (privatemode) {
-            privateSwitch.setTextColor(Color.GREEN)
+        // Check if biometric is enabled and set FLAG_SECURE accordingly
+        BiometricEnabled = readBooleanFromFile("BiometricSettings.txt")
+        if (BiometricEnabled) {
+            window.setFlags(
+                WindowManager.LayoutParams.FLAG_SECURE,
+                WindowManager.LayoutParams.FLAG_SECURE
+            )
         } else {
-            privateSwitch.setTextColor(Color.parseColor("#A7A2A9"))
+            window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        }
+
+        createNotificationChannel()
+
+        // Initialize sharedPreferences and load private mode state
+        sharedPreferences = getSharedPreferences("com.example.cloudycam", Context.MODE_PRIVATE)
+        privatemode = readBooleanFromFile("privateSwitchState.txt")
+
+        // Initialize views
+        username = binding.editTextUsername
+        password = binding.editTextPassword
+        hostname = binding.editTextHostname
+        port = binding.editTextPort
+        remoteFilePath = binding.editTextRemoteFilePath
+        progressBar = binding.progressBar
+        progressBarHorizontal = binding.progressBarHorizontal
+        knownHosts = sharedPreferences.getString(KNOWN_HOSTS_KEY, "") ?: ""
+
+        // Initialize other views
+        val upload = binding.buttonUpload
+        val retakeButton = binding.buttonretake
+        val pairsSwitch: Switch = binding.pairs
+        val pemButton: Button = binding.pem
+        val videoSwitch: Switch = binding.video
+        val privateSwitch: Switch? = binding.privatemode
+        val listbutton = binding.buttonlist
+        val settingsbutton: FloatingActionButton? = binding.settings
+
+        // Load the last file from internal storage if private mode is enabled
+        if (privatemode)
+            loadprivatesnapshot()
+        // Add logging to check if onCreate is reached
+        Log.d("CameraActivity", "onCreate: Activity created and views initialized")
+
+        loadSavedEntries()
+        checkAndRequestPermissions()
+
+        upload.setOnClickListener {
+            if (keymode) {
+                if (lastkey.isNullOrBlank()) {
+                    show("Select a Private Key")
+                } else {
+                    latestTmpFileUri?.let { it1 ->
+                        uploadFILEToServerWithAuthMethod(
+                            it1,
+                            lastkey!!
+                        )
+                    }
+                }
+            } else {
+                latestTmpFileUri?.let { it1 -> uploadFILEToServer(it1) }
+            }
+        }
+        retakeButton.setOnClickListener {
+            Log.d("CameraActivity", "Retake button pressed")
+            restartCamera()
+        }
+
+        pairsSwitch.isChecked = keymode
+        pairsSwitch.setOnCheckedChangeListener { _, isChecked ->
+            pemButton.visibility = if (isChecked) {
+
+                keymode = true
+                writeBooleanToFile(keymode, "pairsSwitchState.txt")
+                Button.VISIBLE
+
+            } else {
+                keymode = false
+                writeBooleanToFile(keymode, "pairsSwitchState.txt")
+                Button.INVISIBLE
+            }
+        }
+        pemButton.setOnClickListener {
+            openKeyFilePicker()
+
+        }
+
+        videoSwitch.isChecked = sharedPreferences.getBoolean("videoSwitchState", false)
+        videoSwitch.setOnCheckedChangeListener { _, isChecked ->
+            sharedPreferences.edit().putBoolean("videoSwitchState", isChecked).apply()
+
+            video = isChecked
+
+            writeBooleanToFile(video, "videoSwitchState.txt")
+
+        }
+        privateSwitch?.isChecked = sharedPreferences.getBoolean("privateSwitchState", false)
+
+        privateSwitch?.setOnCheckedChangeListener { _, isChecked ->
+            // Update the switch state in the shared preferences based on the current state
+            sharedPreferences.edit().putBoolean("privateSwitchState", isChecked).apply()
+            // Set the privatemode variable accordingly
+            privatemode = isChecked
+
+            latestTmpFileUri?.let { uri ->
+                getImageFromUri(this, uri)?.let { bitmap ->
+                    binding.preview.apply {
+                        setImageBitmap(bitmap)
+                    }
+                }}
+            // Write the new state to the file
+            writeBooleanToFile(isChecked, "privateSwitchState.txt")
+            privatemode = readBooleanFromFile("privateSwitchState.txt")
+            if (privatemode) {
+                privateSwitch.setTextColor(Color.GREEN)
+                // Load the last file from internal storage
+                loadprivatesnapshot()
+            } else {
+                privateSwitch.setTextColor(Color.parseColor("#A7A2A9"))
+                // Load the most recent file from DCIM/CloudyCam
+                loadPublicSnapshot()
+            }
         }
 
 
-        takeMedia(video, privatemode)
+
+        binding.gallery.setOnClickListener {
+            openFilePickerForUpload()
+        }
+        listbutton.setOnClickListener {
+            if (keymode) {
+                if (lastkey.isNullOrBlank()) {
+                    show("Select a Private Key")
+                } else {
+                    listwithkey()
+                }
+            } else {
+                listwithoutkey()
+            }
+        }
+
+        // Call the biometric authentication method
+
+        // Find the settings button and set an OnClickLis
+
+        settingsbutton?.setOnClickListener {
+            showBiometricSettingsDialog()
+        }
 
     }
-    val upload = findViewById<Button>(R.id.button_upload)
-    upload.setOnClickListener {
-        if (keymode) {
-            if (lastkey.isNullOrBlank()) {
-                show("Select a Private Key")
+
+    // existing code...
+    private fun loadprivatesnapshot() {
+        if (privatemode) {
+            val storageDir = File(filesDir, "Storage")
+            if (storageDir.exists() && storageDir.isDirectory) {
+                val files = storageDir.listFiles()
+                if (!files.isNullOrEmpty()) {
+                    // Sort files by last modified date in descending order
+                    files.sortByDescending { it.lastModified() }
+                    // Get the most recently modified file
+                    val lastFile = files.firstOrNull()
+                    lastFile?.let {
+                        updateLatestTmpFileUri(it, "Private")
+                        filename = it.name.toString()
+                    }
+                } else {
+                    Log.d("CameraActivity", "No files in internal storage directory")
+                }
             } else {
-                latestTmpFileUri?.let { it1 ->
-                    uploadFILEToServerWithAuthMethod(
-                        it1,
-                        lastkey!!
-                    )
+                Log.d("CameraActivity", "Internal storage directory does not exist or is not a directory")
+            }
+        }
+    }
+
+    private fun loadPublicSnapshot() {
+        val externalStorageDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM), "CloudyCam")
+        
+        // Ensure the directory exists
+        if (!externalStorageDir.exists()) {
+            externalStorageDir.mkdirs() // Create the directory if it doesn't exist
+        }
+        
+        if (externalStorageDir.exists() && externalStorageDir.isDirectory) {
+            val files = externalStorageDir.listFiles()
+            if (!files.isNullOrEmpty()) {
+                // Sort files by last modified date in descending order
+                files.sortByDescending { it.lastModified() }
+                // Get the most recently modified file
+                val lastFile = files.firstOrNull()
+                lastFile?.let {
+                    updateLatestTmpFileUri(it, "Public")
+                    filename = it.name.toString()
+                }
+            } else {
+                Log.d("CameraActivity", "No files in DCIM/CloudyCam directory")
+                // Set progresstext to a null string and display default PNG
+                binding.progresstext.text = ""
+                binding.preview.apply {
+                    setImageResource(R.drawable.whitecloudycam) // Ensure you have a default_image.png in your drawable resources
                 }
             }
         } else {
-            latestTmpFileUri?.let { it1 -> uploadFILEToServer(it1) }
-        }
-    }
-    findViewById<Button>(R.id.buttonretake)?.apply {
-        setOnClickListener {
-            takeMedia(video, privatemode)
-        }
-    }
-
-    val pairsSwitch: Switch = findViewById(R.id.pairs)
-    keymode = readBooleanFromFile("pairsSwitchState.txt")
-    val pemButton: Button = findViewById<Button?>(R.id.pem).apply {
-        visibility = if (keymode) {
-            Button.VISIBLE
-        } else {
-            Button.INVISIBLE
-        }
-    }
-    pairsSwitch.isChecked = keymode
-    pairsSwitch.setOnCheckedChangeListener { _, isChecked ->
-        pemButton.visibility = if (isChecked) {
-
-            keymode = true
-            writeBooleanToFile(keymode, "pairsSwitchState.txt")
-            Button.VISIBLE
-
-        } else {
-            keymode = false
-            writeBooleanToFile(keymode, "pairsSwitchState.txt")
-            Button.INVISIBLE
-        }
-    }
-    pemButton.setOnClickListener {
-        openKeyFilePicker()
-
-    }
-
-    val videoSwitch: Switch = findViewById(R.id.video)
-    videoSwitch.isChecked = sharedPreferences.getBoolean("videoSwitchState", false)
-    videoSwitch.setOnCheckedChangeListener { _, isChecked ->
-        sharedPreferences.edit().putBoolean("videoSwitchState", isChecked).apply()
-
-        video = isChecked
-
-        writeBooleanToFile(video, "videoSwitchState.txt")
-
-    }
-    val privateSwitch: Switch = findViewById(R.id.privatemode)
-    privateSwitch.isChecked = sharedPreferences.getBoolean("privateSwitchState", false)
-
-    privateSwitch.setOnCheckedChangeListener { _, isChecked ->
-        // Update the switch state in the shared preferences based on the current state
-        sharedPreferences.edit().putBoolean("privateSwitchState", isChecked).apply()
-
-        // Set the privatemode variable accordingly
-        privatemode = isChecked
-
-        // Write the new state to the file
-        writeBooleanToFile(isChecked, "privateSwitchState.txt")
-        privatemode = readBooleanFromFile("privateSwitchState.txt")
-        if (privatemode) {
-            privateSwitch.setTextColor(Color.GREEN)
-        } else {
-            privateSwitch.setTextColor(Color.parseColor("#A7A2A9"))
-        }
-    }
-
-
-
-    findViewById<ImageView>(R.id.gallery)?.apply {
-        setOnClickListener {
-            openFilePickerForUpload()
-        }
-    }
-    val listbutton = findViewById<Button>(R.id.buttonlist)
-    listbutton.setOnClickListener {
-        if (keymode) {
-            if (lastkey.isNullOrBlank()) {
-                show("Select a Private Key")
-            } else {
-                listwithkey()
+            Log.d("CameraActivity", "DCIM/CloudyCam directory does not exist or is not a directory")
+            // Set progresstext to a null string and display default PNG
+            binding.progresstext.text = ""
+            binding.preview.apply {
+                setImageResource(R.drawable.whitecloudycam) // Ensure you have a default_image.png in your drawable resources
             }
-        } else {
-            listwithoutkey()
         }
     }
 
-    // Call the biometric authentication method
-
-    // Find the settings button and set an OnClickListener
-    findViewById<Button>(R.id.settings)?.setOnClickListener {
-        showBiometricSettingsDialog()
+    private fun updateLatestTmpFileUri(file: File, mode: String) {
+        latestTmpFileUri = FileProvider.getUriForFile(this, "com.example.cloudycam.provider", file)
+        Log.d("CameraActivity", "$mode snapshot loaded: ${file.name}")
+        // Display the image or video frame
+        latestTmpFileUri?.let { uri ->
+            getImageFromUri(this, uri)?.let { bitmap ->
+                binding.preview.apply {
+                    setImageBitmap(bitmap)
+                    Log.d("CameraActivity", "ImageView updated with $mode snapshot")
+                }
+            } ?: Log.d("CameraActivity", "Failed to get bitmap from URI")
+        }
     }
-}
+
+    override fun onResume() {
+        super.onResume()
+        // Check if private mode is enabled and URI is null
+        loadprivatesnapshot()
+        if (BiometricEnabled && shouldRequestBiometric && isMainLayoutShown) {
+            authenticateUser()
+        }
+
+        // Show biometric prompt when the main window is loaded and isMainLayoutShown is true
+
+        }
+
 
     private fun authenticateUser() {
+        blur()
         val biometricManager = BiometricManager.from(this)
         when (biometricManager.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG)) {
             BiometricManager.BIOMETRIC_SUCCESS -> {
                 // Device can authenticate with biometrics
                 showBiometricPrompt()
             }
+            BiometricManager.BIOMETRIC_ERROR_NO_HARDWARE -> {
+                show("No biometric hardware available")
+            }
+            BiometricManager.BIOMETRIC_ERROR_HW_UNAVAILABLE -> {
+                show("Biometric hardware is currently unavailable")
+            }
+            BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED -> {
+                show("No biometric credentials enrolled")
+            }
             else -> {
-                // Device cannot authenticate with biometrics
-                show("No biometrics available on this device")
+                show("Biometric authentication is not supported")
             }
         }
     }
 
     private fun showBiometricPrompt() {
-        val executor = ContextCompat.getMainExecutor(this)
-        val biometricPrompt = BiometricPrompt(this, executor, object : BiometricPrompt.AuthenticationCallback() {
-            override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
-                super.onAuthenticationError(errorCode, errString)
-                //unblurScreen() // Unblur the screen on error
-                finish() // Close the app on error
-            }
+        if (BiometricEnabled) {
+            val executor = ContextCompat.getMainExecutor(applicationContext)
+            val biometricPrompt =
+                BiometricPrompt(this, executor, object : BiometricPrompt.AuthenticationCallback() {
+                    override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                        super.onAuthenticationError(errorCode, errString)
+showBiometricPrompt()
+                        if (errorCode == BiometricPrompt.ERROR_USER_CANCELED)
+                        {
+                            finish()
+                        }
+                        if (errorCode == BiometricPrompt.ERROR_NEGATIVE_BUTTON
+                        ) {
+                            // Retry the biometric prompt if canceled or back button is pressed
+                            showBiometricPrompt()
+                        }
+                    }
 
-            override fun onAuthenticationFailed() {
-                super.onAuthenticationFailed()
-                //unblurScreen() // Unblur the screen on failure
-                finish() // Close the app on failure
-            }
+                    override fun onAuthenticationFailed() {
+                        super.onAuthenticationFailed()
+                        runOnUiThread {
+                            failedAttempts++
+                            show("Authentication failed")
+                            if (failedAttempts >= maxFailedAttempts) {
+                                finish() // Close the app after max failed attempts
+                            } else {
+                                showBiometricPrompt() // Retry the authentication
+                            }
+                        }
+                    }
 
-            override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
-                super.onAuthenticationSucceeded(result)
-                shouldRequestBiometric = false
-                unblurScreen() // Unblur the screen on success
-            }
-        })
+                    override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                        super.onAuthenticationSucceeded(result)
+                        runOnUiThread {
+                            failedAttempts = 0
+                            shouldRequestBiometric = false
+                            unblur() // Unblur the screen on success
+                            show("Authentication succeeded")
+                        }
+                    }
+                })
 
-        val promptInfo = BiometricPrompt.PromptInfo.Builder()
-            .setTitle("Biometric Authentication")
-            .setSubtitle("Authenticate to access the app")
-            .setNegativeButtonText("Cancel")
-            .build()
+            val promptInfo = BiometricPrompt.PromptInfo.Builder()
+                .setTitle("Biometric Authentication")
+                .setSubtitle("Authenticate to access the app")
+                .setNegativeButtonText("Cancel")
+                .build()
 
-        // Blur the screen when the prompt is shown
-        blurScreen()
-        biometricPrompt.authenticate(promptInfo)
+            biometricPrompt.authenticate(promptInfo)
+        } else {
+            show("Biometric authentication is not enabled")
+        }
     }
 
-    private fun blurScreen() {
-        val view = window.decorView
-        view.alpha = 0f // Adjust the alpha value to create a blur effect
-    }
-
-    private fun unblurScreen (){
-        val view = window.decorView
-        view.alpha = 1f
-    }
 
     fun listwithkey() {
         progressBar.visibility = ProgressBar.VISIBLE
@@ -809,7 +958,8 @@ class CameraActivity : AppCompatActivity() {
                 .show()
         }
     }
-//DOWNLOAD LIST OF THE CURRENT FOLDERS CONTENTS - USING A KEY
+
+    //DOWNLOAD LIST OF THE CURRENT FOLDERS CONTENTS - USING A KEY
     private fun downloadlistwithkey(user: String, host: String, port: Int, lastkey: String) {
         val folderPath = remoteFilePath.text.toString()
 
@@ -825,7 +975,7 @@ class CameraActivity : AppCompatActivity() {
                 sftpChannel!!.connect()
 
                 val entries = sftpChannel!!.ls(folderPath).toArray().toMutableList()
-                val detailedEntries = entries.map {parseFileEntry(it as ChannelSftp.LsEntry) }
+                val detailedEntries = entries.map { parseFileEntry(it as ChannelSftp.LsEntry) }
 
 
 
@@ -843,7 +993,7 @@ class CameraActivity : AppCompatActivity() {
 
             } catch (e: Exception) {
                 runOnUiThread {
-                    val message = e.message.toString().replace("file","Folder")
+                    val message = e.message.toString().replace("file", "Folder")
                     show("Failed: $message")
                     // Set cancel button visibility to INVISIBLE when upload fails
                     progressBar.visibility = ProgressBar.INVISIBLE
@@ -853,7 +1003,7 @@ class CameraActivity : AppCompatActivity() {
         }.start()
     }
 
-//GET FINGERPRINT FROM SERVER FOR OF THE CURRENT FOLDERS CONTENTS - WITHOUT A KEY
+    //GET FINGERPRINT FROM SERVER FOR OF THE CURRENT FOLDERS CONTENTS - WITHOUT A KEY
     fun listwithoutkey() {
         progressBar.visibility = ProgressBar.VISIBLE
         val user = username.text.toString()
@@ -891,7 +1041,7 @@ class CameraActivity : AppCompatActivity() {
 
             return
         }
-        
+
 
 //Establish SSH connection and retrieve server fingerprint
         runBlocking {
@@ -959,7 +1109,7 @@ class CameraActivity : AppCompatActivity() {
         }
     }
 
-//DOWNLOAD LIST OF THE CURRENT FOLDERS CONTENTS - WITHOUT A KEY
+    //DOWNLOAD LIST OF THE CURRENT FOLDERS CONTENTS - WITHOUT A KEY
     @SuppressLint("SuspiciousIndentation")
     fun downloadlistwithoutkey(
         user: String,
@@ -981,14 +1131,17 @@ class CameraActivity : AppCompatActivity() {
                 sftpChannel.connect()
 
                 val entries = sftpChannel.ls(folderPath).toArray().toMutableList()
-                val detailedEntries = entries.map {parseFileEntry(it as ChannelSftp.LsEntry) }
+                val detailedEntries = entries.map { parseFileEntry(it as ChannelSftp.LsEntry) }
 
                 sftpChannel.disconnect()
                 session.disconnect()
 
                 runOnUiThread {
 
-                    showlisthtml(detailedEntries.sortedDescending().reversed().toString().removeSurrounding("[","]"))
+                    showlisthtml(
+                        detailedEntries.sortedDescending().reversed().toString()
+                            .removeSurrounding("[", "]")
+                    )
 
 
                     progressBar.visibility = ProgressBar.INVISIBLE
@@ -996,7 +1149,7 @@ class CameraActivity : AppCompatActivity() {
 
             } catch (e: Exception) {
                 runOnUiThread {
-                    val message = e.message.toString().replace("file","Folder")
+                    val message = e.message.toString().replace("file", "Folder")
                     show("Failed: $message")
                     // Set cancel button visibility to INVISIBLE when upload fails
                     progressBar.visibility = ProgressBar.INVISIBLE
@@ -1004,9 +1157,9 @@ class CameraActivity : AppCompatActivity() {
             }
 
 
-
         }.start()
     }
+
     //PARSE THE RETRIEVED LIST SO AS TO DISPLAY THE CONTENTS OF THE FOLDER IN HTML FORMAT
     @SuppressLint("SimpleDateFormat")
     private fun parseFileEntry(entry: ChannelSftp.LsEntry): String {
@@ -1021,14 +1174,16 @@ class CameraActivity : AppCompatActivity() {
         val date = Date(timestamp)
         val dateFormat = SimpleDateFormat("dd MMM yyyy HH:mm")
         val formattedDate = dateFormat.format(date)
-        val firstLine = "<font color=\"$color\"><br><br><b>$emoji $fileName</b></font><br>$fileSize<br>$formattedDate<br>$permissions"
+        val firstLine =
+            "<font color=\"$color\"><br><br><b>$emoji $fileName</b></font><br>$fileSize<br>$formattedDate<br>$permissions"
 
 
         // Display the popup with the first line
 
         return firstLine
     }
-//SHOW THE RETRIEVED LIST IN HTML FORMAT
+
+    //SHOW THE RETRIEVED LIST IN HTML FORMAT
     private fun showlisthtml(firstLine: String) {
         val listdialog = AlertDialog.Builder(this@CameraActivity, R.style.CustomAlertDialogList)
             .setTitle("Directory Information")
@@ -1043,8 +1198,7 @@ class CameraActivity : AppCompatActivity() {
     }
 
 
-
-//OPEN FILE PICKER FOR PRIVATE KEY
+    //OPEN FILE PICKER FOR PRIVATE KEY
     fun openKeyFilePicker() {
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
@@ -1059,7 +1213,8 @@ class CameraActivity : AppCompatActivity() {
         }
         pickPemFileLauncher.launch(intent)
     }
-//OPEN FILE PICKER FOR UPLOAD OF GENERIC FILE
+
+    //OPEN FILE PICKER FOR UPLOAD OF GENERIC FILE
     fun openFilePickerForUpload() {
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
@@ -1067,7 +1222,8 @@ class CameraActivity : AppCompatActivity() {
         }
         pickFileForUploadLauncher.launch(intent)
     }
-//PROCESS THE RETRIEVED PRIVATE KEY
+
+    //PROCESS THE RETRIEVED PRIVATE KEY
     fun handlePemFile(uri: Uri) {
         contentResolver.openInputStream(uri)?.use { inputStream ->
             val reader = BufferedReader(InputStreamReader(inputStream))
@@ -1095,7 +1251,8 @@ class CameraActivity : AppCompatActivity() {
             alertDialog.show()
         }
     }
-//LOAD THE SAVED ENTRIES FROM SHARED PREFERENCES AND DISPLAY THEM IN THE FIELDS OF THE ACTIVITY
+
+    //LOAD THE SAVED ENTRIES FROM SHARED PREFERENCES AND DISPLAY THEM IN THE FIELDS OF THE ACTIVITY
     fun loadSavedEntries() {
         val fields = arrayOf(username, password, hostname, port, remoteFilePath)
         val keys = arrayOf("username", "password", "hostname", "port", "remoteFilePath")
@@ -1104,10 +1261,18 @@ class CameraActivity : AppCompatActivity() {
         }
     }
 
+
     override fun onPause() {
         super.onPause()
-        blurScreen()
-        shouldRequestBiometric = true
+        BiometricEnabled = readBooleanFromFile("BiometricSettings.txt")
+        if (BiometricEnabled) {
+            // Ensure blur is applied immediately
+            runOnUiThread {
+                blur()
+            }
+            shouldRequestBiometric = true
+        }
+        // Save any necessary data or state
         val editor = sharedPreferences.edit()
         val fields = arrayOf(username, password, hostname, port, remoteFilePath)
         val keys = arrayOf("username", "password", "hostname", "port", "remoteFilePath")
@@ -1119,86 +1284,75 @@ class CameraActivity : AppCompatActivity() {
         editor.putString(KNOWN_HOSTS_KEY, knownHosts)
         editor.apply()
     }
+
+    override fun onStop() {
+        super.onStop()
+        if (BiometricEnabled) {
+            // Ensure blur is applied immediately
+            runOnUiThread {
+                blur()
+            }
+        }
+    }
+
     //SAVE THE MEDIA TO DEVICE (CURRENTLY IN MP4 or JPG)
+    @SuppressLint("QueryPermissionsNeeded")
     fun takeMedia(isVideo: Boolean, privatemode: Boolean) {
+        Log.d(
+            "CameraActivity",
+            "takeMedia called with isVideo: $isVideo, privatemode: $privatemode"
+        )
+        shouldRequestBiometric = false // Disable biometric requests during media capture
+        isMainLayoutShown = false // Set to false when starting media capture
         val date = LocalDateTime.now()
         val formatter = java.time.format.DateTimeFormatter.ofPattern("HHmmss_dd-MM-yyyy")
         val datetime = date.format(formatter)
-        val externalFilesDir = this.getExternalFilesDir(null)
 
         extension = if (isVideo) ".mp4" else ".jpg"
         filename = "$datetime$extension"
 
-        if (!privatemode){
-        val intent = if (isVideo) Intent(MediaStore.ACTION_VIDEO_CAPTURE) else Intent(MediaStore.ACTION_IMAGE_CAPTURE)
+        val intent =
+            if (isVideo) Intent(MediaStore.ACTION_VIDEO_CAPTURE) else Intent(MediaStore.ACTION_IMAGE_CAPTURE)
         intent.resolveActivity(packageManager)?.let {
-            val contentValues = ContentValues().apply {
-                put(MediaStore.MediaColumns.DISPLAY_NAME, filename)
-                put(MediaStore.MediaColumns.MIME_TYPE, if (isVideo) "video/mp4" else "image/jpeg")
-                if (privatemode){put(
-                    MediaStore.MediaColumns.RELATIVE_PATH,
-                    filesDir.path
-                )}else {
-                    put(
-                        MediaStore.MediaColumns.RELATIVE_PATH,
-                        "DCIM/CloudyCam"
-                    ) // Note: Use "DCIM/photos" to match the default camera directory structure
+            if (privatemode) {
+                // Store in internal storage
+                val storageDir = File(filesDir, "Storage")
+                if (!storageDir.exists()) {
+                    storageDir.mkdirs() // Create the directory if it doesn't exist
+                } else {
+                    // Delete all files in the directory to ensure only one file is stored
+                    deleteFilesExcept(filename, storageDir)
                 }
+                val file = File(storageDir, filename)
+                snapshot =
+                    FileProvider.getUriForFile(this, "com.example.cloudycam.provider", file)
+            } else {
+                // Store in external storage
+                val contentValues = ContentValues().apply {
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, filename)
+                    put(
+                        MediaStore.MediaColumns.MIME_TYPE,
+                        if (isVideo) "video/mp4" else "image/jpeg"
+                    )
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, "DCIM/CloudyCam")
+                }
+                snapshot = contentResolver.insert(
+                    if (isVideo) MediaStore.Video.Media.EXTERNAL_CONTENT_URI else MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                    contentValues
+                )
             }
 
-            val contentResolver = applicationContext.contentResolver
-
-            // Create the media file
-            snap =
-                contentResolver.insert(if (isVideo) MediaStore.Video.Media.EXTERNAL_CONTENT_URI else MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
-
-            snap?.let { uri ->
+            snapshot?.let { uri ->
                 intent.putExtra(MediaStore.EXTRA_OUTPUT, uri)
+                latestTmpFileUri = uri // Ensure latestTmpFileUri is set
                 takeMediaResult.launch(intent)
-                val photosDir = File(externalFilesDir, "CloudyCam")
-
-                if (!photosDir.exists()) {
-                    photosDir.mkdirs() // Creates directories if they do not exist
-                }
             } ?: show("Failed to create media file")
-        } ?: show("No camera app found")
-    }else{
-takeAndHandleMedia(isVideo,privatemode)
-
-    }}
-//SAVE THE MEDIA TO APP (CURRENTLY IN .MP4 or .JPG ONLY)
-    @SuppressLint("QueryPermissionsNeeded")
-    fun takeAndHandleMedia(isVideo: Boolean, privatemode: Boolean) {
-        val storageDir = File("${filesDir}/Storage")
-
-        // Check if the directory exists, if not, create it
-        if (!storageDir.exists()) {
-            storageDir.mkdirs()
-        }
-    // Get the current date and time
-        val date = LocalDateTime.now()
-        val formatter = java.time.format.DateTimeFormatter.ofPattern("HHmmss_dd-MM-yyyy")
-        val datetime = date.format(formatter)
-
-        val extension = if (isVideo) ".mp4" else ".jpg" //This may need updating to support other file types in the future
-        val filename = "$datetime$extension"//"$datetime$extension"
-
-        val intent = if (isVideo) Intent(MediaStore.ACTION_VIDEO_CAPTURE) else Intent(MediaStore.ACTION_IMAGE_CAPTURE)
-        intent.resolveActivity(packageManager)?.let {
-            val contentResolver = applicationContext.contentResolver
-
-            // Create a temporary file to store the captured media
-            val file = File("${filesDir}/Storage", filename)
-            snap = FileProvider.getUriForFile(this, "com.example.cloudycam.provider", file)
-            // Set the output file for the camera intent
-            intent.putExtra(MediaStore.EXTRA_OUTPUT, snap)
-
-            takeMediaResult.launch(intent)
         } ?: show("No camera app found")
     }
 
 
-//UPLOAD FILE TO SERVER WITH USERNAME AND PASSWORD AS AUTH
+
+    //UPLOAD FILE TO SERVER WITH USERNAME AND PASSWORD AS AUTH
     fun uploadFILEToServer(uri: Uri) {
         progressBar.visibility = ProgressBar.VISIBLE
         val user = username.text.toString()
@@ -1250,7 +1404,7 @@ takeAndHandleMedia(isVideo,privatemode)
         runBlocking {
             launch(Dispatchers.IO) {
                 try {
-                    val session = establishSSHConnection(user, host, port,password)
+                    val session = establishSSHConnection(user, host, port, password)
                     val serverFingerprint = session?.hostKey?.getFingerPrint(JSch())
                     session?.disconnect()
                     if (serverFingerprint != null) {
@@ -1270,7 +1424,8 @@ takeAndHandleMedia(isVideo,privatemode)
                         val errorMessage = e.message.toString().removePrefix("UnknownHostKey: ")
                         hostKeyConfirmation(user, host, port, password, uri, errorMessage)
                     } else {
-                        runOnUiThread { show("Using Basic Auth. Failed to establish SSH connection: ${e.message}")
+                        runOnUiThread {
+                            show("Using Basic Auth. Failed to establish SSH connection: ${e.message}")
                             progressBar.visibility = ProgressBar.INVISIBLE
                         }
                     }
@@ -1279,7 +1434,7 @@ takeAndHandleMedia(isVideo,privatemode)
         }
     }
 
-//UPLOAD FILE TO SERVER WITH PRIVATE KEY AS AUTH
+    //UPLOAD FILE TO SERVER WITH PRIVATE KEY AS AUTH
     fun uploadFILEToServerWithAuthMethod(
         uri: Uri,
         privateKey: String
@@ -1298,16 +1453,20 @@ takeAndHandleMedia(isVideo,privatemode)
             return
         }
 
-        if(user.isBlank()){show("Please enter Username")
+        if (user.isBlank()) {
+            show("Please enter Username")
             progressBar.visibility = ProgressBar.INVISIBLE
             return
         }
 
-        if (host.isBlank()){show("Please enter Server Address")
+        if (host.isBlank()) {
+            show("Please enter Server Address")
             progressBar.visibility = ProgressBar.INVISIBLE
             return
         }
-        if (!port.equals(22)){show("Warning! Port is not 22")}
+        if (!port.equals(22)) {
+            show("Warning! Port is not 22")
+        }
 
         if (filesizeformatted.isNullOrBlank()) {
             show("Select a file to upload")
@@ -1320,7 +1479,8 @@ takeAndHandleMedia(isVideo,privatemode)
         runBlocking {
             launch(Dispatchers.IO) {
                 try {
-                    val session = establishSSHConnectionWithPrivateKey(user, host, port, privateKey)
+                    val session =
+                        establishSSHConnectionWithPrivateKey(user, host, port, privateKey)
                     val serverFingerprint = session?.hostKey?.getFingerPrint(JSch())
                     session?.disconnect()
                     if (serverFingerprint != null) {
@@ -1346,7 +1506,8 @@ takeAndHandleMedia(isVideo,privatemode)
                             errorMessage
                         )
                     } else {
-                        runOnUiThread { show("Failed to establish SSH connection: ${e.message}")
+                        runOnUiThread {
+                            show("Failed to establish SSH connection: ${e.message}")
                             progressBar.visibility = ProgressBar.INVISIBLE
                         }
                     }
@@ -1367,7 +1528,13 @@ takeAndHandleMedia(isVideo,privatemode)
     ) {
         runOnUiThread {
             val positiveClickListener = DialogInterface.OnClickListener { _, _ ->
-                establishSSHConnectionAndUploadWithoutPrivateKey(latestTmpFileUri!!,user,host,port,password)
+                establishSSHConnectionAndUploadWithoutPrivateKey(
+                    imageUri,
+                    user,
+                    host,
+                    port,
+                    password
+                )
             }
 
             val negativeClickListener = DialogInterface.OnClickListener { _, _ ->
@@ -1377,14 +1544,19 @@ takeAndHandleMedia(isVideo,privatemode)
 
             AlertDialog.Builder(this@CameraActivity, R.style.CustomAlertDialog)
                 .setTitle("Host Key Confirmation")
-                .setMessage("${errorMessage.replace(". ","\n").replace(" is ",":\n\n")}\n\nYou are using basic Auth \uD83D\uDEC2\n\nDo you want to upload?")
+                .setMessage(
+                    "${
+                        errorMessage.replace(". ", "\n").replace(" is ", ":\n\n")
+                    }\n\nYou are using basic Auth \uD83D\uDEC2\n\nDo you want to upload?"
+                )
                 .setPositiveButton("Yes", positiveClickListener)
                 .setNegativeButton("No", negativeClickListener)
                 .setCancelable(false)
                 .show()
         }
     }
-//SHOW THE DIALOG BOX FOR HOST KEY CONFIRMATION WITH PRIVATE KEY AS AUTH
+
+    //SHOW THE DIALOG BOX FOR HOST KEY CONFIRMATION WITH PRIVATE KEY AS AUTH
     fun hostKeyConfirmationWithPrivateKey(
         imageUri: Uri,
         user: String,
@@ -1397,11 +1569,12 @@ takeAndHandleMedia(isVideo,privatemode)
             val positiveClickListener = DialogInterface.OnClickListener { _, _ ->
 
                 establishSSHConnectionAndUploadWithPrivateKey(
-                    latestTmpFileUri!!,
+                    imageUri,
                     user,
                     host,
                     port,
-                    privateKey)
+                    privateKey
+                )
             }
             val negativeClickListener = DialogInterface.OnClickListener { _, _ ->
                 show("Connection cancelled")
@@ -1410,14 +1583,19 @@ takeAndHandleMedia(isVideo,privatemode)
 
             AlertDialog.Builder(this@CameraActivity, R.style.CustomAlertDialog)
                 .setTitle("Host Key Confirmation")
-                .setMessage("${errorMessage.replace(". ","\n").replace(" is ",":\n\n")}\n\nYou are using a Private Key \uD83D\uDD10\n\nDo you want to upload?")
+                .setMessage(
+                    "${
+                        errorMessage.replace(". ", "\n").replace(" is ", ":\n\n")
+                    }\n\nYou are using a Private Key \uD83D\uDD10\n\nDo you want to upload?"
+                )
                 .setPositiveButton("Yes", positiveClickListener)
                 .setNegativeButton("No", negativeClickListener)
                 .setCancelable(false)
                 .show()
         }
     }
-//ESTABLISH SSH CONNECTION USER USERNAME - WITHOUT PRIVATE KEY
+
+    //ESTABLISH SSH CONNECTION USER USERNAME - WITHOUT PRIVATE KEY
     fun establishSSHConnection(
         user: String,
         host: String,
@@ -1435,7 +1613,8 @@ takeAndHandleMedia(isVideo,privatemode)
             throw e
         }
     }
-//ESTABLISH SSH CONNECTION USER USERNAME - WITH PRIVATE KEY
+
+    //ESTABLISH SSH CONNECTION USER USERNAME - WITH PRIVATE KEY
     private fun establishSSHConnectionWithPrivateKey(
         user: String,
         host: String,
@@ -1454,7 +1633,8 @@ takeAndHandleMedia(isVideo,privatemode)
             throw e
         }
     }
-// ESTABLISH SSH CONNECTION AND UPLOAD USING USERNAME AND PASSWORD - WITHOUT PRIVATE KEY
+
+    // ESTABLISH SSH CONNECTION AND UPLOAD USING USERNAME AND PASSWORD - WITHOUT PRIVATE KEY
     @OptIn(DelicateCoroutinesApi::class)
     fun establishSSHConnectionAndUploadWithoutPrivateKey(
         imageUri: Uri,
@@ -1463,15 +1643,15 @@ takeAndHandleMedia(isVideo,privatemode)
         port: Int,
         password: String,
     ) {
-        val cancel = findViewById<Button>(R.id.button_cancel)
-        val fileNameTextView = findViewById<TextView>(R.id.progresstext)
+        val cancel = binding.buttonCancel
+        val fileNameTextView = binding.progresstext
 
         GlobalScope.launch(Dispatchers.IO) {
 
 
             val folderPath = remoteFilePath.text.toString()
             val finalPath = "$folderPath$filename"
-            val inputStream: InputStream? = latestTmpFileUri?.let {
+            val inputStream: InputStream? = imageUri?.let {
                 contentResolver.openInputStream(
                     it
                 )
@@ -1503,7 +1683,6 @@ takeAndHandleMedia(isVideo,privatemode)
                         val monitor = object : SftpProgressMonitor {
                             var total: Long = 0
                             var count: Long = 0
-
 
                             override fun init(
                                 op: Int,
@@ -1601,7 +1780,8 @@ takeAndHandleMedia(isVideo,privatemode)
 
         }
     }
-// ESTABLISH SSH CONNECTION AND UPLOAD USING USERNAME - WITH PRIVATE KEY
+
+    // ESTABLISH SSH CONNECTION AND UPLOAD USING USERNAME - WITH PRIVATE KEY
     @OptIn(DelicateCoroutinesApi::class)
     fun establishSSHConnectionAndUploadWithPrivateKey(
         imageUri: Uri,
@@ -1610,14 +1790,14 @@ takeAndHandleMedia(isVideo,privatemode)
         port: Int,
         privateKey: String,
     ) {
-        val cancel = findViewById<Button>(R.id.button_cancel)
-        val fileNameTextView = findViewById<TextView>(R.id.progresstext)
+        val cancel = binding.buttonCancel
+        val fileNameTextView = binding.progresstext
 
         GlobalScope.launch(Dispatchers.IO) {
 
             val folderPath = remoteFilePath.text.toString()
             val finalPath = "$folderPath$filename"
-            val inputStream: InputStream? = latestTmpFileUri?.let {
+            val inputStream: InputStream? = imageUri?.let {
                 contentResolver.openInputStream(
                     it
                 )
@@ -1745,15 +1925,17 @@ takeAndHandleMedia(isVideo,privatemode)
 
         }
     }
+
     // Declare notification builder and channel outside the function
     private val channelId = "CloudyCam"
     private val channelName = "CloudyCam"
 
     //THE NOTIFICATION BAR ON THE LOCK SCREEN
-    fun shownotifyfail( message: String) {
+    fun shownotifyfail(message: String) {
         val notificationId = 1 // You can use any unique ID for the notification
         val notificationIntent = Intent(this, CameraActivity::class.java)
-        notificationIntent.flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+        notificationIntent.flags =
+            Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
         val pendingIntent = PendingIntent.getActivity(
             this,
             0,
@@ -1771,14 +1953,20 @@ takeAndHandleMedia(isVideo,privatemode)
 
         // Check if the Android version is Oreo or higher, as notification channels are required for Oreo and higher
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(channelId, channelName, NotificationManager.IMPORTANCE_DEFAULT)
+            val channel =
+                NotificationChannel(
+                    channelId,
+                    channelName,
+                    NotificationManager.IMPORTANCE_DEFAULT
+                )
             val notificationManager = this.getSystemService(NotificationManager::class.java)
             notificationManager.createNotificationChannel(channel)
         }
 
         // Build the notification and display it
         val notification = builder.build()
-        val notificationManager = this.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val notificationManager =
+            this.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         notificationManager.notify(notificationId, notification)
     }
 
@@ -1802,7 +1990,12 @@ takeAndHandleMedia(isVideo,privatemode)
     private var lastUpdateTime: Long = 0
 
 
-    fun updateNotificationProgress(notificationId: Int, progress: Int, title: String, text: String) {
+    fun updateNotificationProgress(
+        notificationId: Int,
+        progress: Int,
+        title: String,
+        text: String
+    ) {
         // Check if one second has elapsed and progress has changed
         val currentTimeMillis = System.currentTimeMillis()
         val oneSecondElapsed = currentTimeMillis - lastUpdateTime >= 1000
@@ -1815,7 +2008,8 @@ takeAndHandleMedia(isVideo,privatemode)
 
             // Create or update notification only when progress changes significantly
             val notificationIntent = Intent(this, CameraActivity::class.java)
-            notificationIntent.flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            notificationIntent.flags =
+                Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
             val pendingIntent = PendingIntent.getActivity(
                 this,
                 0,
@@ -1856,10 +2050,11 @@ takeAndHandleMedia(isVideo,privatemode)
     }
 
 
-    fun shownotifysuccess( message: String) {
+    fun shownotifysuccess(message: String) {
         val notificationId = 1 // You can use any unique ID for the notification
         val notificationIntent = Intent(this, CameraActivity::class.java)
-        notificationIntent.flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+        notificationIntent.flags =
+            Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
         val pendingIntent = PendingIntent.getActivity(
             this,
             0,
@@ -1877,18 +2072,24 @@ takeAndHandleMedia(isVideo,privatemode)
 
         // Check if the Android version is Oreo or higher, as notification channels are required for Oreo and higher
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(channelId, channelName, NotificationManager.IMPORTANCE_DEFAULT)
+            val channel =
+                NotificationChannel(
+                    channelId,
+                    channelName,
+                    NotificationManager.IMPORTANCE_DEFAULT
+                )
             val notificationManager = this.getSystemService(NotificationManager::class.java)
             notificationManager.createNotificationChannel(channel)
         }
 
         // Build the notification and display it
         val notification = builder.build()
-        val notificationManager = this.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val notificationManager =
+            this.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         notificationManager.notify(notificationId, notification)
     }
 
-// A function to simplify the toast messages
+    // A function to simplify the toast messages
     fun show(message: String) {
         Toast.makeText(this, message, Toast.LENGTH_LONG).show()
     }
@@ -1896,48 +2097,167 @@ takeAndHandleMedia(isVideo,privatemode)
     // END OF PERMISSION CHECKING
     fun arePermissionsGranted(): Boolean {
         for (permission in permissions) {
-            if (ContextCompat.checkSelfPermission(this, permission) != PackageManager.PERMISSION_GRANTED) {
+            if (ContextCompat.checkSelfPermission(
+                    this,
+                    permission
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
                 return false
             }
         }
         return true
     }
+
     private fun requestPermissions() {
         requestPermissionLauncher.launch(permissions)
 
     }
 
-    override fun onWindowFocusChanged(hasFocus: Boolean) {
-        super.onWindowFocusChanged(hasFocus)
-        if (hasFocus && shouldRequestBiometric) {authenticateUser()
-        }
-
-    }
-    override fun onDestroy() {
-        super.onDestroy()
-        // Clear the FLAG_KEEP_SCREEN_ON flag when the activity is destroyed
-        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-    }
 
     private fun showBiometricSettingsDialog() {
         val dialogView = layoutInflater.inflate(R.layout.dialog_biometric_settings, null)
-        val biometricSwitch = dialogView.findViewById<Switch>(R.id.switch_biometric)
+        val biometricSwitch = dialogView.findViewById<SwitchMaterial>(R.id.switch_biometric)
 
         // Load the saved state of the biometric switch
-        biometricSwitch.isChecked = sharedPreferences.getBoolean("BiometricEnabled", true)
+        biometricSwitch.isChecked = readBooleanFromFile("BiometricSettings.txt")
 
-        val dialog = AlertDialog.Builder(this)
-            .setTitle("Biometric Authentication Settings")
+        val dialog = AlertDialog.Builder(this, R.style.CustomAlertDialog)
+            .setTitle("Settings")
             .setView(dialogView)
             .setPositiveButton("OK") { _, _ ->
                 // Save the state of the switch
                 BiometricEnabled = biometricSwitch.isChecked
-                sharedPreferences.edit().putBoolean("BiometricEnabled", BiometricEnabled).apply()
+                writeBooleanToFile(BiometricEnabled, "BiometricSettings.txt")
+
+                // Update FLAG_SECURE based on the new biometric setting
+                if (BiometricEnabled) {
+                    window.setFlags(
+                        WindowManager.LayoutParams.FLAG_SECURE,
+                        WindowManager.LayoutParams.FLAG_SECURE
+                    )
+                } else {
+                    window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                }
             }
             .setNegativeButton("Cancel", null)
             .create()
 
         dialog.show()
     }
+
+
+    fun blur() {
+        //OBSCURE THE TEXT ENTRY
+        binding.editTextUsername.visibility = View.INVISIBLE
+        binding.editTextPassword.visibility = View.INVISIBLE
+        binding.editTextPort.visibility = View.INVISIBLE
+        binding.editTextHostname.visibility = View.INVISIBLE
+        binding.editTextRemoteFilePath.visibility = View.INVISIBLE
+        binding.buttonretake.visibility = View.INVISIBLE
+        binding.buttonUpload.visibility = View.INVISIBLE
+        binding.buttonCancel.visibility = View.INVISIBLE
+        binding.progressBar.visibility = View.INVISIBLE
+        binding.progressBarHorizontal.visibility = View.INVISIBLE
+        binding.progresstext.visibility = View.INVISIBLE
+        binding.preview.visibility = View.INVISIBLE
+        binding.video.visibility = View.INVISIBLE
+        binding.pairs.visibility = View.INVISIBLE
+        binding.buttonlist.visibility = View.INVISIBLE
+        binding.gallery.visibility = View.INVISIBLE
+        binding.settings?.visibility = View.INVISIBLE
+        binding.privatemode?.visibility = View.INVISIBLE
+
+
+    }
+
+    fun unblur() {
+
+        binding.editTextUsername.visibility = View.VISIBLE
+        binding.editTextPassword.visibility = View.VISIBLE
+        binding.editTextPort.visibility = View.VISIBLE
+        binding.editTextHostname.visibility = View.VISIBLE
+        binding.editTextRemoteFilePath.visibility = View.VISIBLE
+        binding.buttonretake.visibility = View.VISIBLE
+        binding.buttonUpload.visibility = View.VISIBLE
+        binding.progressBarHorizontal.visibility = View.VISIBLE
+        binding.progresstext.visibility = View.VISIBLE
+        binding.preview.visibility = View.VISIBLE
+        binding.video.visibility = View.VISIBLE
+        binding.pairs.visibility = View.VISIBLE
+        binding.buttonlist.visibility = View.VISIBLE
+        binding.gallery.visibility = View.VISIBLE
+        binding.settings?.visibility = View.VISIBLE
+        binding.privatemode?.visibility = View.VISIBLE
+
+
+    }
+
+    private fun restartCamera() {
+        // Reset any necessary state here
+
+
+        // Reinitialize the camera
+        if (arePermissionsGranted()) {
+            takeMedia(video, privatemode)
+        } else {
+            Log.d("CameraActivity", "Permissions not granted")
+            requestPermissions()
+        }
+
+    }
+
+    private fun showAlertDialog(
+        title: String,
+        message: String,
+        positiveAction: () -> Unit,
+        negativeAction: () -> Unit
+    ) {
+        AlertDialog.Builder(this@CameraActivity, R.style.CustomAlertDialog)
+            .setTitle(title)
+            .setMessage(message)
+            .setPositiveButton("Yes") { _, _ -> positiveAction() }
+            .setNegativeButton("No") { _, _ -> negativeAction() }
+            .setCancelable(false)
+            .show()
+    }
+
+    private fun checkAndRequestPermissions() {
+        if (!arePermissionsGranted()) {
+            requestPermissions()
+        } else {
+            initializeMediaSettings()
+        }
+    }
+
+    private fun initializeMediaSettings() {
+        video = readBooleanFromFile("videoSwitchState.txt")
+        BiometricEnabled = readBooleanFromFile("BiometricSettings.txt")
+        if (privatemode) {
+            binding.privatemode?.setTextColor(Color.GREEN)
+        } else {
+            binding.privatemode?.setTextColor(Color.parseColor("#A7A2A9"))
+        }
+        takeMedia(video, privatemode)
+    }
+
+    private fun uploadFile(uri: Uri, user: String, host: String, port: Int, password: String) {
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val session = establishSSHConnection(user, host, port, password)
+                // Handle session and upload logic
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    show("Failed to establish SSH connection: ${e.message}")
+                    progressBar.visibility = ProgressBar.INVISIBLE
+                }
+            }
+        }
+    }
 }
+
+
+
+
+
+
 

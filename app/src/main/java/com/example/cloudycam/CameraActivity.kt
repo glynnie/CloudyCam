@@ -65,6 +65,7 @@ import com.google.android.material.floatingactionbutton.FloatingActionButton
 import com.google.android.material.switchmaterial.SwitchMaterial
 import android.util.Log
 import android.os.Environment
+import androidx.core.net.toUri
 import androidx.lifecycle.lifecycleScope
 import com.example.cloudycam.databinding.ActivityMainBinding
 import kotlinx.coroutines.withContext
@@ -309,7 +310,7 @@ class CameraActivity : AppCompatActivity() {
             ""
         }
         val progressText = "$monkey$filename $filesizeformatted"
-        if (filesizeformatted.endsWith("0 B",false))
+        if (filesizeformatted =="0 B")
             {
         fileNameTextView.text =""}
         else{fileNameTextView.text = progressText}
@@ -702,6 +703,7 @@ class CameraActivity : AppCompatActivity() {
                     lastFile?.let {
                         updateLatestTmpFileUri(it, "Private")
                         filename = it.name.toString()
+                        latestTmpFileUri = it.toUri()
                     }
                 } else {
                     Log.d("CameraActivity", "No files in internal storage directory")
@@ -730,6 +732,7 @@ class CameraActivity : AppCompatActivity() {
                 lastFile?.let {
                     updateLatestTmpFileUri(it, "Public")
                     filename = it.name.toString()
+                    latestTmpFileUri = it.toUri()
                 }
             } else {
                 Log.d("CameraActivity", "No files in DCIM/CloudyCam directory")

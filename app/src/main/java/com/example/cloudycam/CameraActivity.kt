@@ -1375,9 +1375,6 @@ showBiometricPrompt()
 
                 return
             }
-            if (!port.equals(22)) {
-                show("Warning! Port is not 22")
-            }
 
             if (filesizeformatted.isNullOrBlank()) {
                 show("Select a file to upload")

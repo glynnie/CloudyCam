@@ -65,7 +65,6 @@ import com.google.android.material.floatingactionbutton.FloatingActionButton
 import com.google.android.material.switchmaterial.SwitchMaterial
 import android.util.Log
 import android.os.Environment
-import androidx.core.net.toUri
 import androidx.lifecycle.lifecycleScope
 import com.example.cloudycam.databinding.ActivityMainBinding
 import kotlinx.coroutines.withContext
@@ -82,8 +81,7 @@ class CameraActivity : AppCompatActivity() {
     //DECLARE VARIABLES
     var sftpChannel: ChannelSftp? = null // Reference to the SFTP channel
     lateinit var knownHosts: String
-    var latestTmpFileUri: Uri? = null
-    private var snapshot: Uri? = null
+    private var currentFileUri: Uri? = null
     lateinit var username: EditText
     lateinit var password: EditText
     lateinit var hostname: EditText
@@ -146,16 +144,20 @@ class CameraActivity : AppCompatActivity() {
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             if (result.resultCode == Activity.RESULT_OK) {
                 // Handle successful capture
-                snapshot = result.data?.data ?: latestTmpFileUri
-                latestTmpFileUri = snapshot // Ensure latestTmpFileUri is updated
+                currentFileUri = result.data?.data ?: currentFileUri
 
-                // Display the captured image if snapshot is available
-                snapshot?.let { uri ->
+                // Display the captured image if currentFileUri is available
+                currentFileUri?.let { uri ->
                     getImageFromUri(this, uri)?.let { bitmap ->
                         binding.preview.apply {
                             setImageBitmap(bitmap)
                         }
                     }
+                }
+                val storageDir = File(filesDir, "Storage")
+                if (storageDir.exists()) {
+                    // Delete all files except the latest one
+                    deleteFilesExcept(filename, storageDir)
                 }
             } else if (result.resultCode == Activity.RESULT_CANCELED) {
                 runOnUiThread {
@@ -287,7 +289,7 @@ class CameraActivity : AppCompatActivity() {
         }
     }
 
-    // Function to determine if the latestTmpFileUri is stored in the specified internal storage path
+    // Function to determine if the currentFileUri is stored in the specified internal storage path
     private fun isStoredInInternalStorage(uri: Uri): Boolean {
         val isInternal = uri.path?.startsWith("/internal_files/") == true
         return isInternal
@@ -298,19 +300,18 @@ class CameraActivity : AppCompatActivity() {
     @SuppressLint("UseCompatLoadingForDrawables")
     fun getImageFromUri(context: Context, uri: Uri): Bitmap? {
         progressBarHorizontal.progress = 0
-        latestTmpFileUri = uri
-        val mimeType = context.contentResolver.getType(uri)
-        val filename = getFileName(uri)
+        val mimeType = context.contentResolver.getType(currentFileUri!!)
+        val filename = getFileName(currentFileUri!!)
         val fileNameTextView = binding.progresstext
-        filesizeformatted = formatFileSize(getFileSize(this, latestTmpFileUri!!))
-        filesizeinbytes = getFileSize(this, latestTmpFileUri!!)
-        val monkey = if (isStoredInInternalStorage(uri)) {
+        filesizeformatted = formatFileSize(getFileSize(this, currentFileUri!!))
+        filesizeinbytes = getFileSize(this, currentFileUri!!)
+        val monkey = if (isStoredInInternalStorage(currentFileUri!!)) {
             "PRIVATE 🙈 "
         } else {
             ""
         }
         val progressText = "$monkey$filename $filesizeformatted"
-        if (filesizeformatted =="0 B")
+        if (filesizeformatted=="0 B")
             {
         fileNameTextView.text =""}
         else{fileNameTextView.text = progressText}
@@ -466,22 +467,21 @@ class CameraActivity : AppCompatActivity() {
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             if (result.resultCode == Activity.RESULT_OK) {
                 result.data?.data?.let { uri ->
-                    extension = getFileExtension(uri)
-                    filename = getFileName(uri)
-                    binding.preview.apply {
-                        visibility = ImageView.VISIBLE
-                        setImageBitmap(getImageFromUri(context, uri))
+                    currentFileUri = uri
+                    extension = getFileExtension(currentFileUri!!)
+                    filename = getFileName(currentFileUri!!)
+                    binding.preview.apply {setImageBitmap(getImageFromUri(this@CameraActivity, currentFileUri!!))}
 
-                    }
+
                     if (keymode) {
                         val alertDialogBuilder =
                             AlertDialog.Builder(this@CameraActivity, R.style.CustomAlertDialog)
-                        val filesize = formatFileSize(getFileSize(this, uri))
+                        val filesize = formatFileSize(getFileSize(this, currentFileUri!!))
                         alertDialogBuilder.setTitle("File Selected\nUploading with Key \uD83D\uDD10")
                         alertDialogBuilder.setMessage("Would you like to continue with the upload of:\n$filename?\n\n$filesize")
                         alertDialogBuilder.setCancelable(false) // Set non-dismissable
                         alertDialogBuilder.setPositiveButton("Yes") { _, _ ->
-                            lastkey?.let { uploadFILEToServerWithAuthMethod(uri, it) }
+                            lastkey?.let { uploadFILEToServerWithAuthMethod(it) }
                         }
                         alertDialogBuilder.setNegativeButton("No") { dialog, _ ->
                             progressBar.visibility = ProgressBar.INVISIBLE
@@ -492,12 +492,12 @@ class CameraActivity : AppCompatActivity() {
                     } else {
                         val alertDialogBuilder =
                             AlertDialog.Builder(this@CameraActivity, R.style.CustomAlertDialog)
-                        val filesize = formatFileSize(getFileSize(this, uri))
+                        val filesize = formatFileSize(getFileSize(this, currentFileUri!!))
                         alertDialogBuilder.setTitle("File Selected\nUploading without Key \uD83D\uDEC2")
                         alertDialogBuilder.setMessage("Would you like to continue with the upload of:\n$filename?\n\n$filesize")
                         alertDialogBuilder.setCancelable(false) // Set non-dismissable
                         alertDialogBuilder.setPositiveButton("Yes") { _, _ ->
-                            uploadFILEToServer(uri)
+                            uploadFILEToServer(currentFileUri!!)
                         }
                         alertDialogBuilder.setNegativeButton("No") { dialog, _ ->
                             progressBar.visibility = ProgressBar.INVISIBLE
@@ -579,6 +579,7 @@ class CameraActivity : AppCompatActivity() {
         // Load the last file from internal storage if private mode is enabled
         if (privatemode)
             loadprivatesnapshot()
+           else {loadPublicSnapshot()}
         // Add logging to check if onCreate is reached
         Log.d("CameraActivity", "onCreate: Activity created and views initialized")
 
@@ -590,15 +591,11 @@ class CameraActivity : AppCompatActivity() {
                 if (lastkey.isNullOrBlank()) {
                     show("Select a Private Key")
                 } else {
-                    latestTmpFileUri?.let { it1 ->
-                        uploadFILEToServerWithAuthMethod(
-                            it1,
-                            lastkey!!
-                        )
+                        uploadFILEToServerWithAuthMethod(lastkey!!)
                     }
-                }
+
             } else {
-                latestTmpFileUri?.let { it1 -> uploadFILEToServer(it1) }
+                currentFileUri?.let { it1 -> uploadFILEToServer(it1) }
             }
         }
         retakeButton.setOnClickListener {
@@ -636,18 +633,13 @@ class CameraActivity : AppCompatActivity() {
         }
         privateSwitch?.isChecked = sharedPreferences.getBoolean("privateSwitchState", false)
 
+        val pickFileButton = binding.gallery // Assuming 'gallery' is the button for picking a generic file
+
         privateSwitch?.setOnCheckedChangeListener { _, isChecked ->
             // Update the switch state in the shared preferences based on the current state
             sharedPreferences.edit().putBoolean("privateSwitchState", isChecked).apply()
             // Set the privatemode variable accordingly
             privatemode = isChecked
-
-            latestTmpFileUri?.let { uri ->
-                getImageFromUri(this, uri)?.let { bitmap ->
-                    binding.preview.apply {
-                        setImageBitmap(bitmap)
-                    }
-                }}
             // Write the new state to the file
             writeBooleanToFile(isChecked, "privateSwitchState.txt")
             privatemode = readBooleanFromFile("privateSwitchState.txt")
@@ -657,6 +649,7 @@ class CameraActivity : AppCompatActivity() {
                 loadprivatesnapshot()
             } else {
                 privateSwitch.setTextColor(Color.parseColor("#A7A2A9"))
+                pickFileButton.visibility = View.VISIBLE // Make the button visible in public mode
                 // Load the most recent file from DCIM/CloudyCam
                 loadPublicSnapshot()
             }
@@ -689,7 +682,6 @@ class CameraActivity : AppCompatActivity() {
 
     }
 
-    // existing code...
     private fun loadprivatesnapshot() {
         if (privatemode) {
             val storageDir = File(filesDir, "Storage")
@@ -703,7 +695,6 @@ class CameraActivity : AppCompatActivity() {
                     lastFile?.let {
                         updateLatestTmpFileUri(it, "Private")
                         filename = it.name.toString()
-                        latestTmpFileUri = it.toUri()
                     }
                 } else {
                     Log.d("CameraActivity", "No files in internal storage directory")
@@ -732,7 +723,6 @@ class CameraActivity : AppCompatActivity() {
                 lastFile?.let {
                     updateLatestTmpFileUri(it, "Public")
                     filename = it.name.toString()
-                    latestTmpFileUri = it.toUri()
                 }
             } else {
                 Log.d("CameraActivity", "No files in DCIM/CloudyCam directory")
@@ -753,10 +743,10 @@ class CameraActivity : AppCompatActivity() {
     }
 
     private fun updateLatestTmpFileUri(file: File, mode: String) {
-        latestTmpFileUri = FileProvider.getUriForFile(this, "com.example.cloudycam.provider", file)
+        currentFileUri = FileProvider.getUriForFile(this, "com.example.cloudycam.provider", file)
         Log.d("CameraActivity", "$mode snapshot loaded: ${file.name}")
         // Display the image or video frame
-        latestTmpFileUri?.let { uri ->
+        currentFileUri?.let { uri ->
             getImageFromUri(this, uri)?.let { bitmap ->
                 binding.preview.apply {
                     setImageBitmap(bitmap)
@@ -769,7 +759,6 @@ class CameraActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         // Check if private mode is enabled and URI is null
-        loadprivatesnapshot()
         if (BiometricEnabled && shouldRequestBiometric && isMainLayoutShown) {
             authenticateUser()
         }
@@ -1245,7 +1234,7 @@ showBiometricPrompt()
             alertDialogBuilder.setMessage("Preview:\n\n$privatepreview\n\n...\n\nDo you want to proceed with the upload?")
             alertDialogBuilder.setCancelable(false) // Set non-dismissable
             alertDialogBuilder.setPositiveButton("Yes") { _, _ ->
-                uploadFILEToServerWithAuthMethod(uri, privateKey)
+                uploadFILEToServerWithAuthMethod(privateKey)
             }
             alertDialogBuilder.setNegativeButton("No") { dialog, _ ->
                 dialog.dismiss()
@@ -1314,40 +1303,31 @@ showBiometricPrompt()
         extension = if (isVideo) ".mp4" else ".jpg"
         filename = "$datetime$extension"
 
-        val intent =
-            if (isVideo) Intent(MediaStore.ACTION_VIDEO_CAPTURE) else Intent(MediaStore.ACTION_IMAGE_CAPTURE)
+        val intent = if (isVideo) Intent(MediaStore.ACTION_VIDEO_CAPTURE) else Intent(MediaStore.ACTION_IMAGE_CAPTURE)
         intent.resolveActivity(packageManager)?.let {
             if (privatemode) {
                 // Store in internal storage
                 val storageDir = File(filesDir, "Storage")
                 if (!storageDir.exists()) {
                     storageDir.mkdirs() // Create the directory if it doesn't exist
-                } else {
-                    // Delete all files in the directory to ensure only one file is stored
-                    deleteFilesExcept(filename, storageDir)
                 }
                 val file = File(storageDir, filename)
-                snapshot =
-                    FileProvider.getUriForFile(this, "com.example.cloudycam.provider", file)
+                currentFileUri = FileProvider.getUriForFile(this, "com.example.cloudycam.provider", file)
             } else {
                 // Store in external storage
                 val contentValues = ContentValues().apply {
                     put(MediaStore.MediaColumns.DISPLAY_NAME, filename)
-                    put(
-                        MediaStore.MediaColumns.MIME_TYPE,
-                        if (isVideo) "video/mp4" else "image/jpeg"
-                    )
+                    put(MediaStore.MediaColumns.MIME_TYPE, if (isVideo) "video/mp4" else "image/jpeg")
                     put(MediaStore.MediaColumns.RELATIVE_PATH, "DCIM/CloudyCam")
                 }
-                snapshot = contentResolver.insert(
+                currentFileUri = contentResolver.insert(
                     if (isVideo) MediaStore.Video.Media.EXTERNAL_CONTENT_URI else MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
                     contentValues
                 )
             }
 
-            snapshot?.let { uri ->
+            currentFileUri?.let { uri ->
                 intent.putExtra(MediaStore.EXTRA_OUTPUT, uri)
-                latestTmpFileUri = uri // Ensure latestTmpFileUri is set
                 takeMediaResult.launch(intent)
             } ?: show("Failed to create media file")
         } ?: show("No camera app found")
@@ -1355,169 +1335,171 @@ showBiometricPrompt()
 
 
 
+
     //UPLOAD FILE TO SERVER WITH USERNAME AND PASSWORD AS AUTH
     fun uploadFILEToServer(uri: Uri) {
-        progressBar.visibility = ProgressBar.VISIBLE
-        val user = username.text.toString()
-        val host = hostname.text.toString()
-        val port = port.text.toString().toIntOrNull() ?: 22
-        val password = password.text.toString()
-        val folderPath = remoteFilePath.text.toString()
+        currentFileUri?.let { uri ->
+            progressBar.visibility = ProgressBar.VISIBLE
+            val user = username.text.toString()
+            val host = hostname.text.toString()
+            val port = port.text.toString().toIntOrNull() ?: 22
+            val password = password.text.toString()
+            val folderPath = remoteFilePath.text.toString()
 
-        // Ensure folder path ends with "/"
-        if (!folderPath.endsWith("/")) {
-            show("Folder path format incorrect")
-            progressBar.visibility = ProgressBar.INVISIBLE
+            // Ensure folder path ends with "/"
+            if (!folderPath.endsWith("/")) {
+                show("Folder path format incorrect")
+                progressBar.visibility = ProgressBar.INVISIBLE
 
-            return
-        }
+                return
+            }
 
-        if (user.isBlank()) {
-            show("Please enter Username")
-            progressBar.visibility = ProgressBar.INVISIBLE
+            if (user.isBlank()) {
+                show("Please enter Username")
+                progressBar.visibility = ProgressBar.INVISIBLE
 
-            return
+                return
 
-        }
+            }
 
-        if (password.isBlank()) {
-            show("Please enter Password")
-            progressBar.visibility = ProgressBar.INVISIBLE
+            if (password.isBlank()) {
+                show("Please enter Password")
+                progressBar.visibility = ProgressBar.INVISIBLE
 
-            return
-        }
+                return
+            }
 
-        if (host.isBlank()) {
-            show("Please enter Server Address")
-            progressBar.visibility = ProgressBar.INVISIBLE
+            if (host.isBlank()) {
+                show("Please enter Server Address")
+                progressBar.visibility = ProgressBar.INVISIBLE
 
-            return
-        }
-        if (!port.equals(22)) {
-            show("Warning! Port is not 22")
-        }
+                return
+            }
+            if (!port.equals(22)) {
+                show("Warning! Port is not 22")
+            }
 
-        if (filesizeformatted.isNullOrBlank()) {
-            show("Select a file to upload")
-            progressBar.visibility = ProgressBar.INVISIBLE
+            if (filesizeformatted.isNullOrBlank()) {
+                show("Select a file to upload")
+                progressBar.visibility = ProgressBar.INVISIBLE
 
-            return
-        }
+                return
+            }
 
-        runBlocking {
-            launch(Dispatchers.IO) {
-                try {
-                    val session = establishSSHConnection(user, host, port, password)
-                    val serverFingerprint = session?.hostKey?.getFingerPrint(JSch())
-                    session?.disconnect()
-                    if (serverFingerprint != null) {
-                        session.disconnect()
-                        show("Failed to retrieve server fingerprint")
-                        progressBar.visibility = ProgressBar.INVISIBLE
-
-                    } else {
+            runBlocking {
+                launch(Dispatchers.IO) {
+                    try {
+                        val session = establishSSHConnection(user, host, port, password)
+                        val serverFingerprint = session?.hostKey?.getFingerPrint(JSch())
                         session?.disconnect()
-                        show("Failed to establish SSH connection")
-                        progressBar.visibility = ProgressBar.INVISIBLE
-
-                    }
-                } catch (e: Exception) {
-
-                    if (e.message?.contains("UnknownHostKey:") == true) {
-                        val errorMessage = e.message.toString().removePrefix("UnknownHostKey: ")
-                        hostKeyConfirmation(user, host, port, password, uri, errorMessage)
-                    } else {
-                        runOnUiThread {
-                            show("Using Basic Auth. Failed to establish SSH connection: ${e.message}")
+                        if (serverFingerprint != null) {
+                            session.disconnect()
+                            show("Failed to retrieve server fingerprint")
                             progressBar.visibility = ProgressBar.INVISIBLE
+
+                        } else {
+                            session?.disconnect()
+                            show("Failed to establish SSH connection")
+                            progressBar.visibility = ProgressBar.INVISIBLE
+
+                        }
+                    } catch (e: Exception) {
+
+                        if (e.message?.contains("UnknownHostKey:") == true) {
+                            val errorMessage = e.message.toString().removePrefix("UnknownHostKey: ")
+                            hostKeyConfirmation(user, host, port, password, uri, errorMessage)
+                        } else {
+                            runOnUiThread {
+                                show("Using Basic Auth. Failed to establish SSH connection: ${e.message}")
+                                progressBar.visibility = ProgressBar.INVISIBLE
+                            }
                         }
                     }
                 }
             }
-        }
+        } ?: show("Select a file to upload")
     }
 
     //UPLOAD FILE TO SERVER WITH PRIVATE KEY AS AUTH
-    fun uploadFILEToServerWithAuthMethod(
-        uri: Uri,
-        privateKey: String
-    ) {
-        progressBar.visibility = ProgressBar.VISIBLE
-        val user = username.text.toString()
-        val host = hostname.text.toString()
-        val port = port.text.toString().toIntOrNull() ?: 22
+    fun uploadFILEToServerWithAuthMethod(privateKey: String) {
+        currentFileUri?.let { uri ->
+            progressBar.visibility = ProgressBar.VISIBLE
+            val user = username.text.toString()
+            val host = hostname.text.toString()
+            val port = port.text.toString().toIntOrNull() ?: 22
 
-        val folderPath = remoteFilePath.text.toString()
+            val folderPath = remoteFilePath.text.toString()
 
-        // Ensure folder path ends with "/"
-        if (!folderPath.endsWith("/")) {
-            show("Folder path format incorrect")
-            progressBar.visibility = ProgressBar.INVISIBLE
-            return
-        }
+            // Ensure folder path ends with "/"
+            if (!folderPath.endsWith("/")) {
+                show("Folder path format incorrect")
+                progressBar.visibility = ProgressBar.INVISIBLE
+                return
+            }
 
-        if (user.isBlank()) {
-            show("Please enter Username")
-            progressBar.visibility = ProgressBar.INVISIBLE
-            return
-        }
+            if (user.isBlank()) {
+                show("Please enter Username")
+                progressBar.visibility = ProgressBar.INVISIBLE
+                return
+            }
 
-        if (host.isBlank()) {
-            show("Please enter Server Address")
-            progressBar.visibility = ProgressBar.INVISIBLE
-            return
-        }
-        if (!port.equals(22)) {
-            show("Warning! Port is not 22")
-        }
+            if (host.isBlank()) {
+                show("Please enter Server Address")
+                progressBar.visibility = ProgressBar.INVISIBLE
+                return
+            }
+            if (!port.equals(22)) {
+                show("Warning! Port is not 22")
+            }
 
-        if (filesizeformatted.isNullOrBlank()) {
-            show("Select a file to upload")
-            progressBar.visibility = ProgressBar.INVISIBLE
+            if (filesizeformatted.isNullOrBlank()) {
+                show("Select a file to upload")
+                progressBar.visibility = ProgressBar.INVISIBLE
 
-            return
-        }
+                return
+            }
 
 
-        runBlocking {
-            launch(Dispatchers.IO) {
-                try {
-                    val session =
-                        establishSSHConnectionWithPrivateKey(user, host, port, privateKey)
-                    val serverFingerprint = session?.hostKey?.getFingerPrint(JSch())
-                    session?.disconnect()
-                    if (serverFingerprint != null) {
-                        session.disconnect()
-                        show("Failed to retrieve server fingerprint")
-                        progressBar.visibility = ProgressBar.INVISIBLE
-
-                    } else {
+            runBlocking {
+                launch(Dispatchers.IO) {
+                    try {
+                        val session =
+                            establishSSHConnectionWithPrivateKey(user, host, port, privateKey)
+                        val serverFingerprint = session?.hostKey?.getFingerPrint(JSch())
                         session?.disconnect()
-                        show("Failed to establish SSH connection")
-                        progressBar.visibility = ProgressBar.INVISIBLE
-
-                    }
-                } catch (e: Exception) {
-                    if (e.message?.contains("UnknownHostKey:") == true) {
-                        val errorMessage = e.message.toString().removePrefix("UnknownHostKey: ")
-                        hostKeyConfirmationWithPrivateKey(
-                            uri,
-                            user,
-                            host,
-                            port,
-                            privateKey,
-                            errorMessage
-                        )
-                    } else {
-                        runOnUiThread {
-                            show("Failed to establish SSH connection: ${e.message}")
+                        if (serverFingerprint != null) {
+                            session.disconnect()
+                            show("Failed to retrieve server fingerprint")
                             progressBar.visibility = ProgressBar.INVISIBLE
-                        }
-                    }
 
+                        } else {
+                            session?.disconnect()
+                            show("Failed to establish SSH connection")
+                            progressBar.visibility = ProgressBar.INVISIBLE
+
+                        }
+                    } catch (e: Exception) {
+                        if (e.message?.contains("UnknownHostKey:") == true) {
+                            val errorMessage = e.message.toString().removePrefix("UnknownHostKey: ")
+                            hostKeyConfirmationWithPrivateKey(
+                                uri,
+                                user,
+                                host,
+                                port,
+                                privateKey,
+                                errorMessage
+                            )
+                        } else {
+                            runOnUiThread {
+                                show("Failed to establish SSH connection: ${e.message}")
+                                progressBar.visibility = ProgressBar.INVISIBLE
+                            }
+                        }
+
+                    }
                 }
             }
-        }
+        } ?: show("Select a file to upload")
     }
 
     //SHOW THE DIALOG BOX FOR HOST KEY CONFIRMATION WITH USERNAME AND PASSWORD AS AUTH

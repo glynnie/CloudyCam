@@ -316,12 +316,12 @@
         android:layout_width="145dp"
         android:layout_height="50dp"
         android:backgroundTint="#A746E1"
-        android:drawableLeft="@drawable/cloud_download_fill0_wght400_grad0_opsz24"
+        android:drawableLeft="@drawable/folder_open_fill0_wght400_grad0_opsz24"
         android:drawableRight="@drawable/list_fill0_wght400_grad0_opsz24"
-        android:text="List"
+        android:text="Path"
         android:textAllCaps="true"
         android:textColor="@color/white"
-        android:textSize="14dp"
+        android:textSize="13dp"
         app:layout_constraintEnd_toEndOf="@+id/pem"
         app:layout_constraintTop_toBottomOf="@+id/editTextRemoteFilePath" />
 

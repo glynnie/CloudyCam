@@ -4,6 +4,9 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.AlertDialog
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.ContentResolver
 import android.content.ContentValues
 import android.content.Context
@@ -11,63 +14,59 @@ import android.content.DialogInterface
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Color
+import android.media.MediaMetadataRetriever
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.provider.MediaStore
+import android.provider.OpenableColumns
+import android.text.Html
+import android.util.Log
+import android.view.LayoutInflater
+import android.view.View
+import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.Button
 import android.widget.EditText
-import android.widget.ImageView
 import android.widget.ProgressBar
+import android.widget.RemoteViews
 import android.widget.Switch
+import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.biometric.BiometricManager
+import androidx.biometric.BiometricPrompt
+import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
-import com.jcraft.jsch.ChannelSftp
-import com.jcraft.jsch.JSch
-import com.jcraft.jsch.JSchException
-import com.jcraft.jsch.Session
-import com.jcraft.jsch.SftpProgressMonitor
+import androidx.core.content.FileProvider
+import androidx.core.graphics.drawable.toBitmap
+import androidx.exifinterface.media.ExifInterface
+import androidx.lifecycle.lifecycleScope
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
+import com.example.cloudycam.databinding.ActivityMainBinding
+import com.google.android.material.floatingactionbutton.FloatingActionButton
+import com.google.android.material.switchmaterial.SwitchMaterial
+import com.jcraft.jsch.*
+import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import java.io.BufferedReader
+import java.io.File
 import java.io.InputStream
 import java.io.InputStreamReader
-import java.time.LocalDateTime
-import android.provider.OpenableColumns
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.media.MediaMetadataRetriever
-import android.view.View
-import android.widget.TextView
-import androidx.core.graphics.drawable.toBitmap
-import androidx.exifinterface.media.ExifInterface
-import kotlinx.coroutines.DelicateCoroutinesApi
-import kotlinx.coroutines.GlobalScope
-import java.io.File
 import java.text.DecimalFormat
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import android.app.PendingIntent
-import android.graphics.Color
-import android.os.Build
-import android.text.Html
-import android.widget.RemoteViews
-import androidx.core.app.NotificationCompat
-import androidx.core.content.FileProvider
 import java.text.SimpleDateFormat
+import java.time.LocalDateTime
 import java.util.*
-import androidx.biometric.BiometricManager
-import androidx.biometric.BiometricPrompt
-import com.google.android.material.floatingactionbutton.FloatingActionButton
-import com.google.android.material.switchmaterial.SwitchMaterial
-import android.util.Log
-import android.os.Environment
-import androidx.lifecycle.lifecycleScope
-import com.example.cloudycam.databinding.ActivityMainBinding
-import kotlinx.coroutines.withContext
 
 
 //END OF IMPORTS START OF VARIABLES
@@ -104,6 +103,10 @@ class CameraActivity : AppCompatActivity() {
     private val maxFailedAttempts = 5
     private var isMainLayoutShown = false
     private lateinit var binding: ActivityMainBinding
+    private lateinit var recyclerView: RecyclerView
+    private lateinit var fileAdapter: FileAdapter
+    var path: String = ""
+    private var fileExplorerDialog: AlertDialog? = null
 
 
     //END OF VARIABLES START OF PERMISSION CHECK
@@ -155,7 +158,7 @@ class CameraActivity : AppCompatActivity() {
                     }
                 }
                 val storageDir = File(filesDir, "Storage")
-                if (storageDir.exists()) {
+                if (storageDir.exists() && privatemode) {
                     // Delete all files except the latest one
                     deleteFilesExcept(filename, storageDir)
                 }
@@ -171,7 +174,7 @@ class CameraActivity : AppCompatActivity() {
         }
 
     // Decode and display bitmap using coroutines
-    
+
 
     fun deleteFilesExcept(filenameToKeep: String, directory: File) {
         if (!directory.exists() || !directory.isDirectory) {
@@ -241,9 +244,27 @@ class CameraActivity : AppCompatActivity() {
                         )
                         // Rotate the bitmap if necessary
                         bitmap = when (orientation) {
-                            ExifInterface.ORIENTATION_ROTATE_90 -> bitmap?.let { rotateBitmap(it, 90f) }
-                            ExifInterface.ORIENTATION_ROTATE_180 -> bitmap?.let { rotateBitmap(it, 180f) }
-                            ExifInterface.ORIENTATION_ROTATE_270 -> bitmap?.let { rotateBitmap(it, 270f) }
+                            ExifInterface.ORIENTATION_ROTATE_90 -> bitmap?.let {
+                                rotateBitmap(
+                                    it,
+                                    90f
+                                )
+                            }
+
+                            ExifInterface.ORIENTATION_ROTATE_180 -> bitmap?.let {
+                                rotateBitmap(
+                                    it,
+                                    180f
+                                )
+                            }
+
+                            ExifInterface.ORIENTATION_ROTATE_270 -> bitmap?.let {
+                                rotateBitmap(
+                                    it,
+                                    270f
+                                )
+                            }
+
                             else -> bitmap
                         }
                     }
@@ -256,6 +277,7 @@ class CameraActivity : AppCompatActivity() {
         }
     }
 
+    // FUNCTION TO REDUCE DOWN THE BITMAP SIZE
     fun calculateInSampleSize(options: BitmapFactory.Options, reqWidth: Int, reqHeight: Int): Int {
         val (height: Int, width: Int) = options.run { outHeight to outWidth }
         var inSampleSize = 1
@@ -311,10 +333,11 @@ class CameraActivity : AppCompatActivity() {
             ""
         }
         val progressText = "$monkey$filename $filesizeformatted"
-        if (filesizeformatted=="0 B")
-            {
-        fileNameTextView.text =""}
-        else{fileNameTextView.text = progressText}
+        if (filesizeformatted == "0 B") {
+            fileNameTextView.text = ""
+        } else {
+            fileNameTextView.text = progressText
+        }
         return if (filename.contains(".jpg", true) || filename.contains(
                 ".jpeg",
                 true
@@ -453,7 +476,9 @@ class CameraActivity : AppCompatActivity() {
 
     //FORMAT THE FILE SIZE OF THE FILE TO BE EASILY READABLE BY THE USER
     fun formatFileSize(size: Long): String {
-        if (size <= 0){return "0 B"}
+        if (size <= 0) {
+            return "0 B"
+        }
         val units = arrayOf("B", "KB", "MB", "GB", "TB")
         val digitGroups = (Math.log10(size.toDouble()) / Math.log10(1024.0)).toInt()
         val df = DecimalFormat("#.##")
@@ -470,7 +495,14 @@ class CameraActivity : AppCompatActivity() {
                     currentFileUri = uri
                     extension = getFileExtension(currentFileUri!!)
                     filename = getFileName(currentFileUri!!)
-                    binding.preview.apply {setImageBitmap(getImageFromUri(this@CameraActivity, currentFileUri!!))}
+                    binding.preview.apply {
+                        setImageBitmap(
+                            getImageFromUri(
+                                this@CameraActivity,
+                                currentFileUri!!
+                            )
+                        )
+                    }
 
 
                     if (keymode) {
@@ -579,7 +611,9 @@ class CameraActivity : AppCompatActivity() {
         // Load the last file from internal storage if private mode is enabled
         if (privatemode)
             loadprivatesnapshot()
-           else {loadPublicSnapshot()}
+        else {
+            loadPublicSnapshot()
+        }
         // Add logging to check if onCreate is reached
         Log.d("CameraActivity", "onCreate: Activity created and views initialized")
 
@@ -591,8 +625,8 @@ class CameraActivity : AppCompatActivity() {
                 if (lastkey.isNullOrBlank()) {
                     show("Select a Private Key")
                 } else {
-                        uploadFILEToServerWithAuthMethod(lastkey!!)
-                    }
+                    uploadFILEToServerWithAuthMethod(lastkey!!)
+                }
 
             } else {
                 currentFileUri?.let { it1 -> uploadFILEToServer(it1) }
@@ -633,7 +667,8 @@ class CameraActivity : AppCompatActivity() {
         }
         privateSwitch?.isChecked = sharedPreferences.getBoolean("privateSwitchState", false)
 
-        val pickFileButton = binding.gallery // Assuming 'gallery' is the button for picking a generic file
+        val pickFileButton =
+            binding.gallery // Assuming 'gallery' is the button for picking a generic file
 
         privateSwitch?.setOnCheckedChangeListener { _, isChecked ->
             // Update the switch state in the shared preferences based on the current state
@@ -660,16 +695,25 @@ class CameraActivity : AppCompatActivity() {
         binding.gallery.setOnClickListener {
             openFilePickerForUpload()
         }
+
         listbutton.setOnClickListener {
+            if (hostname.text.isBlank()) {
+                show("Please enter Server Address")
+                return@setOnClickListener
+            }
+            val initialPath = remoteFilePath.text.toString()
+            if (initialPath.isBlank()) {
+                show("Please enter Remote File Path")
+                return@setOnClickListener
+            }
             if (keymode) {
-                if (lastkey.isNullOrBlank()) {
-                    show("Select a Private Key")
-                } else {
-                    listwithkey()
-                }
+                path = remoteFilePath.text.toString()
+                listwithkey()
             } else {
+                path = remoteFilePath.text.toString()
                 listwithoutkey()
             }
+
         }
 
         // Call the biometric authentication method
@@ -682,6 +726,7 @@ class CameraActivity : AppCompatActivity() {
 
     }
 
+    //HANDLE WHEN PRIVATE MODE IS SWITCHED TO ENABLED
     private fun loadprivatesnapshot() {
         if (privatemode) {
             val storageDir = File(filesDir, "Storage")
@@ -700,19 +745,26 @@ class CameraActivity : AppCompatActivity() {
                     Log.d("CameraActivity", "No files in internal storage directory")
                 }
             } else {
-                Log.d("CameraActivity", "Internal storage directory does not exist or is not a directory")
+                Log.d(
+                    "CameraActivity",
+                    "Internal storage directory does not exist or is not a directory"
+                )
             }
         }
     }
 
+    //HANDLE WHEN PRIVATE MODE IS SWITCHED TO DISABLED
     private fun loadPublicSnapshot() {
-        val externalStorageDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM), "CloudyCam")
-        
+        val externalStorageDir = File(
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM),
+            "CloudyCam"
+        )
+
         // Ensure the directory exists
         if (!externalStorageDir.exists()) {
             externalStorageDir.mkdirs() // Create the directory if it doesn't exist
         }
-        
+
         if (externalStorageDir.exists() && externalStorageDir.isDirectory) {
             val files = externalStorageDir.listFiles()
             if (!files.isNullOrEmpty()) {
@@ -745,7 +797,6 @@ class CameraActivity : AppCompatActivity() {
     private fun updateLatestTmpFileUri(file: File, mode: String) {
         currentFileUri = FileProvider.getUriForFile(this, "com.example.cloudycam.provider", file)
         Log.d("CameraActivity", "$mode snapshot loaded: ${file.name}")
-        // Display the image or video frame
         currentFileUri?.let { uri ->
             getImageFromUri(this, uri)?.let { bitmap ->
                 binding.preview.apply {
@@ -756,41 +807,49 @@ class CameraActivity : AppCompatActivity() {
         }
     }
 
+    //ON RESUME OVERRIDE
     override fun onResume() {
         super.onResume()
-        // Check if private mode is enabled and URI is null
-        if (BiometricEnabled && shouldRequestBiometric && isMainLayoutShown) {
-            authenticateUser()
-        }
-
         // Show biometric prompt when the main window is loaded and isMainLayoutShown is true
+        if (BiometricEnabled && shouldRequestBiometric && isMainLayoutShown) {
+            lifecycleScope.launch {
+                delay(200)
 
+
+                authenticateUser()
+            }
         }
 
+    }
 
+    //START OF BIOMETRIC AUTH
     private fun authenticateUser() {
-        blur()
         val biometricManager = BiometricManager.from(this)
         when (biometricManager.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG)) {
             BiometricManager.BIOMETRIC_SUCCESS -> {
                 // Device can authenticate with biometrics
                 showBiometricPrompt()
             }
+
             BiometricManager.BIOMETRIC_ERROR_NO_HARDWARE -> {
                 show("No biometric hardware available")
             }
+
             BiometricManager.BIOMETRIC_ERROR_HW_UNAVAILABLE -> {
                 show("Biometric hardware is currently unavailable")
             }
+
             BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED -> {
                 show("No biometric credentials enrolled")
             }
+
             else -> {
                 show("Biometric authentication is not supported")
             }
         }
     }
 
+    //BIOMETRIC PROMPT, HANDLING OF ERRORS ETC.
     private fun showBiometricPrompt() {
         if (BiometricEnabled) {
             val executor = ContextCompat.getMainExecutor(applicationContext)
@@ -798,9 +857,8 @@ class CameraActivity : AppCompatActivity() {
                 BiometricPrompt(this, executor, object : BiometricPrompt.AuthenticationCallback() {
                     override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
                         super.onAuthenticationError(errorCode, errString)
-showBiometricPrompt()
-                        if (errorCode == BiometricPrompt.ERROR_USER_CANCELED)
-                        {
+                        showBiometricPrompt()
+                        if (errorCode == BiometricPrompt.ERROR_USER_CANCELED) {
                             finish()
                         }
                         if (errorCode == BiometricPrompt.ERROR_NEGATIVE_BUTTON
@@ -828,8 +886,12 @@ showBiometricPrompt()
                         runOnUiThread {
                             failedAttempts = 0
                             shouldRequestBiometric = false
-                            unblur() // Unblur the screen on success
-                            show("Authentication succeeded")
+                            lifecycleScope.launch {
+                                delay(200)
+                                // Perform your action here
+                                unblur()
+                            }
+
                         }
                     }
                 })
@@ -846,7 +908,7 @@ showBiometricPrompt()
         }
     }
 
-
+    //RETRIEVE THE FINGERPRINT OF THE SERVER FOR THE CURRENT FOLDERS CONTENTS - WITH A KEY
     fun listwithkey() {
         progressBar.visibility = ProgressBar.VISIBLE
         val user = username.text.toString()
@@ -854,6 +916,7 @@ showBiometricPrompt()
         val port = port.text.toString().toIntOrNull() ?: 22
         val lastkey = lastkey
         val folderPath = remoteFilePath.text.toString()
+        val password = password.text.toString()
 
         // Ensure folder path ends with "/"
         if (!folderPath.endsWith("/")) {
@@ -877,16 +940,13 @@ showBiometricPrompt()
 
             return
         }
-        if (!port.equals(22)) {
-            show("Warning! Port is not 22")
-        }
 
 
         runBlocking {
             launch(Dispatchers.IO) {
                 try {
                     val session =
-                        lastkey?.let { establishSSHConnectionWithPrivateKey(user, host, port, it) }
+                        establishSSHConnection(user, host, port, password)
                     val serverFingerprint = session?.hostKey?.getFingerPrint(JSch())
                     session?.disconnect()
                     if (serverFingerprint != null) {
@@ -917,7 +977,7 @@ showBiometricPrompt()
 
     }
 
-    //CONFIRM TO LIST OF THE CURRENT FOLDERS CONTENTS - USING A KEY
+    //CONFIRM DIALOG TO LIST OF THE CURRENT FOLDERS CONTENTS - USING A KEY
     private fun listhostKeyConfirmationwithkey(
         user: String,
         host: String,
@@ -953,7 +1013,6 @@ showBiometricPrompt()
 
     //DOWNLOAD LIST OF THE CURRENT FOLDERS CONTENTS - USING A KEY
     private fun downloadlistwithkey(user: String, host: String, port: Int, lastkey: String) {
-        val folderPath = remoteFilePath.text.toString()
 
         Thread {
             try {
@@ -966,9 +1025,16 @@ showBiometricPrompt()
                 sftpChannel = session.openChannel("sftp") as ChannelSftp
                 sftpChannel!!.connect()
 
-                val entries = sftpChannel!!.ls(folderPath).toArray().toMutableList()
-                val detailedEntries = entries.map { parseFileEntry(it as ChannelSftp.LsEntry) }
-
+                val entries = sftpChannel!!.ls(path).toArray().toMutableList()
+                val fileInfoList = entries.map {
+                    val lsEntry = it as ChannelSftp.LsEntry
+                    FileInfo(
+                        lsEntry.filename,
+                        lsEntry.attrs.isDir,
+                        lsEntry.attrs.size,
+                        lsEntry.attrs.mTime * 1000L
+                    )
+                }.sortedWith(compareBy({ !it.isDirectory }, { it.name }))
 
 
                 sftpChannel!!.disconnect()
@@ -976,8 +1042,7 @@ showBiometricPrompt()
 
                 runOnUiThread {
 
-                    showlisthtml(detailedEntries.toString())
-
+                    showFileExplorerDialog(fileInfoList)
 
                     progressBar.visibility = ProgressBar.INVISIBLE
                 }
@@ -1097,9 +1162,9 @@ showBiometricPrompt()
                 .setNegativeButton("No", negativeClickListener)
                 .setCancelable(false)
                 .show()
-
         }
     }
+
 
     //DOWNLOAD LIST OF THE CURRENT FOLDERS CONTENTS - WITHOUT A KEY
     @SuppressLint("SuspiciousIndentation")
@@ -1107,9 +1172,8 @@ showBiometricPrompt()
         user: String,
         host: String,
         port: Int,
-        password: String
+        password: String,
     ) {
-        val folderPath = remoteFilePath.text.toString()
 
         Thread {
             try {
@@ -1121,20 +1185,24 @@ showBiometricPrompt()
 
                 val sftpChannel = session.openChannel("sftp") as ChannelSftp
                 sftpChannel.connect()
+                val entries = sftpChannel.ls(path).toArray().toMutableList()
+                val fileInfoList = entries.map {
+                    val lsEntry = it as ChannelSftp.LsEntry
+                    FileInfo(
+                        lsEntry.filename,
+                        lsEntry.attrs.isDir,
+                        lsEntry.attrs.size,
+                        lsEntry.attrs.mTime * 1000L
+                    )
+                }.sortedWith(compareBy({ !it.isDirectory }, { it.name }))
 
-                val entries = sftpChannel.ls(folderPath).toArray().toMutableList()
-                val detailedEntries = entries.map { parseFileEntry(it as ChannelSftp.LsEntry) }
 
                 sftpChannel.disconnect()
                 session.disconnect()
 
                 runOnUiThread {
 
-                    showlisthtml(
-                        detailedEntries.sortedDescending().reversed().toString()
-                            .removeSurrounding("[", "]")
-                    )
-
+                    showFileExplorerDialog(fileInfoList)
 
                     progressBar.visibility = ProgressBar.INVISIBLE
                 }
@@ -1150,43 +1218,6 @@ showBiometricPrompt()
 
 
         }.start()
-    }
-
-    //PARSE THE RETRIEVED LIST SO AS TO DISPLAY THE CONTENTS OF THE FOLDER IN HTML FORMAT
-    @SuppressLint("SimpleDateFormat")
-    private fun parseFileEntry(entry: ChannelSftp.LsEntry): String {
-        val fileName = entry.filename
-
-        val color = if (fileName.matches(Regex("^[^.].*\\..+$"))) "#80ccff" else "#80ff80"
-        val emoji = if (fileName.matches(Regex("^[^.].*\\..+$"))) "📄" else "📁"
-        val attrs = entry.attrs
-        val fileSize = formatFileSize(attrs.size)
-        val permissions = Integer.toOctalString(attrs.permissions)
-        val timestamp = attrs.mTime * 1000L // Convert to milliseconds
-        val date = Date(timestamp)
-        val dateFormat = SimpleDateFormat("dd MMM yyyy HH:mm")
-        val formattedDate = dateFormat.format(date)
-        val firstLine =
-            "<font color=\"$color\"><br><br><b>$emoji $fileName</b></font><br>$fileSize<br>$formattedDate<br>$permissions"
-
-
-        // Display the popup with the first line
-
-        return firstLine
-    }
-
-    //SHOW THE RETRIEVED LIST IN HTML FORMAT
-    private fun showlisthtml(firstLine: String) {
-        val listdialog = AlertDialog.Builder(this@CameraActivity, R.style.CustomAlertDialogList)
-            .setTitle("Directory Information")
-            .setMessage(Html.fromHtml(firstLine))
-            .setPositiveButton("OK") { dialog, _ -> dialog.dismiss() }
-            .setCancelable(true)
-            .show()
-
-        listdialog.findViewById<TextView>(android.R.id.message)?.apply {
-            textSize = 10f
-        }
     }
 
 
@@ -1303,7 +1334,8 @@ showBiometricPrompt()
         extension = if (isVideo) ".mp4" else ".jpg"
         filename = "$datetime$extension"
 
-        val intent = if (isVideo) Intent(MediaStore.ACTION_VIDEO_CAPTURE) else Intent(MediaStore.ACTION_IMAGE_CAPTURE)
+        val intent =
+            if (isVideo) Intent(MediaStore.ACTION_VIDEO_CAPTURE) else Intent(MediaStore.ACTION_IMAGE_CAPTURE)
         intent.resolveActivity(packageManager)?.let {
             if (privatemode) {
                 // Store in internal storage
@@ -1312,12 +1344,16 @@ showBiometricPrompt()
                     storageDir.mkdirs() // Create the directory if it doesn't exist
                 }
                 val file = File(storageDir, filename)
-                currentFileUri = FileProvider.getUriForFile(this, "com.example.cloudycam.provider", file)
+                currentFileUri =
+                    FileProvider.getUriForFile(this, "com.example.cloudycam.provider", file)
             } else {
                 // Store in external storage
                 val contentValues = ContentValues().apply {
                     put(MediaStore.MediaColumns.DISPLAY_NAME, filename)
-                    put(MediaStore.MediaColumns.MIME_TYPE, if (isVideo) "video/mp4" else "image/jpeg")
+                    put(
+                        MediaStore.MediaColumns.MIME_TYPE,
+                        if (isVideo) "video/mp4" else "image/jpeg"
+                    )
                     put(MediaStore.MediaColumns.RELATIVE_PATH, "DCIM/CloudyCam")
                 }
                 currentFileUri = contentResolver.insert(
@@ -1332,8 +1368,6 @@ showBiometricPrompt()
             } ?: show("Failed to create media file")
         } ?: show("No camera app found")
     }
-
-
 
 
     //UPLOAD FILE TO SERVER WITH USERNAME AND PASSWORD AS AUTH
@@ -1424,7 +1458,7 @@ showBiometricPrompt()
             val user = username.text.toString()
             val host = hostname.text.toString()
             val port = port.text.toString().toIntOrNull() ?: 22
-
+            val password = password.text.toString()
             val folderPath = remoteFilePath.text.toString()
 
             // Ensure folder path ends with "/"
@@ -1461,7 +1495,7 @@ showBiometricPrompt()
                 launch(Dispatchers.IO) {
                     try {
                         val session =
-                            establishSSHConnectionWithPrivateKey(user, host, port, privateKey)
+                            establishSSHConnection(user, host, port, password)
                         val serverFingerprint = session?.hostKey?.getFingerPrint(JSch())
                         session?.disconnect()
                         if (serverFingerprint != null) {
@@ -1510,7 +1544,7 @@ showBiometricPrompt()
     ) {
         runOnUiThread {
             val positiveClickListener = DialogInterface.OnClickListener { _, _ ->
-                establishSSHConnectionAndUploadWithoutPrivateKey(
+                UploadWithoutPrivateKey(
                     imageUri,
                     user,
                     host,
@@ -1577,35 +1611,38 @@ showBiometricPrompt()
         }
     }
 
-    //ESTABLISH SSH CONNECTION USER USERNAME - WITHOUT PRIVATE KEY
-    fun establishSSHConnection(
-        user: String,
-        host: String,
-        port: Int,
-        password: String
-    ): Session? {
-        val jsch = JSch()
-        val session = jsch.getSession(user, host, port)
-        session.setConfig("StrictHostKeyChecking", "ask")
-        try {
-            session.connect()
-            return session
-        } catch (e: Exception) {
-            session.disconnect()
-            throw e
-        }
-    }
-
-    //ESTABLISH SSH CONNECTION USER USERNAME - WITH PRIVATE KEY
-    private fun establishSSHConnectionWithPrivateKey(
+    //ESTABLISH SSH CONNECTION USING A KEY
+    private fun establishSSHConnectionWithKey(
         user: String,
         host: String,
         port: Int,
         privateKey: String
     ): Session? {
+        try {
+            val jsch = JSch()
+            jsch.addIdentity("key", privateKey.toByteArray(), null, null)
+            val session = jsch.getSession(user, host, port)
+            session.setConfig(
+                "StrictHostKeyChecking",
+                "ask"
+            )  // or "no" if you want to skip host key checking
+            session.connect()
+            return session
+        } catch (e: Exception) {
+            runOnUiThread { show("SSH connection failed: ${e.message}") }
+            return null
+        }
+    }
+
+    //ESTABLISH SSH CONNECTION USER USERNAME - WITHOUT AUTH
+    fun establishSSHConnection(
+        user: String,
+        host: String,
+        port: Int,
+        password: String,
+    ): Session? {
         val jsch = JSch()
         val session = jsch.getSession(user, host, port)
-
         session.setConfig("StrictHostKeyChecking", "ask")
         try {
             session.connect()
@@ -1616,9 +1653,10 @@ showBiometricPrompt()
         }
     }
 
+
     // ESTABLISH SSH CONNECTION AND UPLOAD USING USERNAME AND PASSWORD - WITHOUT PRIVATE KEY
     @OptIn(DelicateCoroutinesApi::class)
-    fun establishSSHConnectionAndUploadWithoutPrivateKey(
+    fun UploadWithoutPrivateKey(
         imageUri: Uri,
         user: String,
         host: String,
@@ -2148,6 +2186,7 @@ showBiometricPrompt()
         binding.gallery.visibility = View.INVISIBLE
         binding.settings?.visibility = View.INVISIBLE
         binding.privatemode?.visibility = View.INVISIBLE
+        binding.pem.visibility = View.INVISIBLE
 
 
     }
@@ -2170,6 +2209,11 @@ showBiometricPrompt()
         binding.gallery.visibility = View.VISIBLE
         binding.settings?.visibility = View.VISIBLE
         binding.privatemode?.visibility = View.VISIBLE
+        if (keymode) {
+            binding.pem.visibility = View.VISIBLE
+        } else {
+            binding.pem.visibility = View.INVISIBLE
+        }
 
 
     }
@@ -2188,20 +2232,6 @@ showBiometricPrompt()
 
     }
 
-    private fun showAlertDialog(
-        title: String,
-        message: String,
-        positiveAction: () -> Unit,
-        negativeAction: () -> Unit
-    ) {
-        AlertDialog.Builder(this@CameraActivity, R.style.CustomAlertDialog)
-            .setTitle(title)
-            .setMessage(message)
-            .setPositiveButton("Yes") { _, _ -> positiveAction() }
-            .setNegativeButton("No") { _, _ -> negativeAction() }
-            .setCancelable(false)
-            .show()
-    }
 
     private fun checkAndRequestPermissions() {
         if (!arePermissionsGranted()) {
@@ -2222,20 +2252,174 @@ showBiometricPrompt()
         takeMedia(video, privatemode)
     }
 
-    private fun uploadFile(uri: Uri, user: String, host: String, port: Int, password: String) {
-        lifecycleScope.launch(Dispatchers.IO) {
-            try {
-                val session = establishSSHConnection(user, host, port, password)
-                // Handle session and upload logic
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main) {
-                    show("Failed to establish SSH connection: ${e.message}")
-                    progressBar.visibility = ProgressBar.INVISIBLE
+    //RECYCLERVIEW ADAPTER
+    class FileAdapter(
+        private var fileInfoList: List<FileInfo>,
+        private val onItemClick: (FileInfo) -> Unit
+    ) : RecyclerView.Adapter<FileAdapter.FileViewHolder>() {
+
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): FileViewHolder {
+            val view = LayoutInflater.from(parent.context)
+                .inflate(R.layout.list_item_file, parent, false)
+            return FileViewHolder(view)
+        }
+
+        override fun onBindViewHolder(holder: FileViewHolder, position: Int) {
+            val fileInfo = fileInfoList[position]
+            holder.bind(fileInfo)
+            holder.itemView.setOnClickListener { onItemClick(fileInfo) }
+        }
+
+        override fun getItemCount(): Int = fileInfoList.size
+
+        inner class FileViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
+            private val fileNameTextView: TextView = itemView.findViewById(R.id.fileNameTextView)
+            private val fileSizeTextView: TextView = itemView.findViewById(R.id.fileSizeTextView)
+
+            @SuppressLint("SimpleDateFormat")
+            fun bind(fileInfo: FileInfo) {
+                val icon = if (fileInfo.isDirectory) "📁" else "📄"
+                fileNameTextView.text = "$icon ${fileInfo.name}"
+
+                fileSizeTextView.text =
+                    if (fileInfo.isDirectory) "" else formatFileSize(fileInfo.size)
+            }
+        }
+
+        fun updateData(newFileInfoList: List<FileInfo>) {
+            fileInfoList = newFileInfoList
+            notifyDataSetChanged()
+        }
+
+        fun formatFileSize(size: Long): String {
+            if (size <= 0) {
+                return "0 B"
+            }
+            val units = arrayOf("B", "KB", "MB", "GB", "TB")
+            val digitGroups = (Math.log10(size.toDouble()) / Math.log10(1024.0)).toInt()
+            val df = DecimalFormat("#.##")
+            return df.format(
+                size / Math.pow(
+                    1024.0,
+                    digitGroups.toDouble()
+                )
+            ) + " " + units[digitGroups]
+        }
+    }
+
+    data class FileInfo(
+        val name: String,
+        val isDirectory: Boolean,
+        val size: Long,
+        val modifiedDate: Long
+    )
+
+    private fun showFileExplorerDialog(fileInfoList: List<FileInfo>) {
+        if (fileExplorerDialog?.isShowing == true) {
+            fileAdapter?.updateData(fileInfoList)
+            fileExplorerDialog?.setTitle("$path")
+            return
+        }
+
+        val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_file_explorer, null)
+        recyclerView = dialogView.findViewById(R.id.recyclerView)
+        recyclerView.layoutManager = LinearLayoutManager(this)
+
+        fileAdapter = FileAdapter(fileInfoList) { fileInfo ->
+            when (fileInfo.name) {
+                ".." -> {
+                    path = path.removeSuffix("/")
+                    path = path.substringBeforeLast("/", "") + "/"
+                    if (path.isEmpty()) path = "/"
+                    if (keymode) {
+                        downloadlistwithkey(
+                            username.text.toString(),
+                            hostname.text.toString(),
+                            port.text.toString().toIntOrNull() ?: 22,
+                            lastkey!!
+                        )
+                    } else {
+                        downloadlistwithoutkey(
+                            username.text.toString(),
+                            hostname.text.toString(),
+                            port.text.toString().toIntOrNull() ?: 22,
+                            password.text.toString()
+                        )
+                    }
+                }
+
+                "." -> {
+                    path = "/"
+                    if (keymode) {
+                        lastkey?.let {
+                            downloadlistwithkey(
+                                username.text.toString(),
+                                hostname.text.toString(),
+                                port.text.toString().toIntOrNull() ?: 22,
+                                it
+                            )
+                        }
+                            ?: show("Select a Private Key")
+                    } else {
+                        downloadlistwithoutkey(
+                            username.text.toString(),
+                            hostname.text.toString(),
+                            port.text.toString().toIntOrNull() ?: 22,
+                            password.text.toString()
+                        )
+                    }
+                }
+
+                else -> if (fileInfo.isDirectory) {
+                    path = "$path${fileInfo.name}/"
+                    if (keymode) {
+                        downloadlistwithkey(
+                            username.text.toString(),
+                            hostname.text.toString(),
+                            port.text.toString().toIntOrNull() ?: 22,
+                            lastkey!!
+                        )
+                    } else {
+                        downloadlistwithoutkey(
+                            username.text.toString(),
+                            hostname.text.toString(),
+                            port.text.toString().toIntOrNull() ?: 22,
+                            password.text.toString()
+                        )
+                    }
+                } else {
+                    show("Please Select a Folder")
                 }
             }
         }
+        recyclerView.adapter = fileAdapter
+
+        fileExplorerDialog = AlertDialog.Builder(this, R.style.CustomAlertDialogList)
+            .setTitle("$path")
+            .setView(dialogView)
+            .setPositiveButton("OK") { dialog, _ ->
+                val remoteFilePathEditText: EditText = findViewById(R.id.editTextRemoteFilePath)
+                remoteFilePathEditText.setText(path)
+                dialog.dismiss()
+            }
+            .create()
+
+        fileExplorerDialog?.apply {
+            setOnShowListener {
+                val params = window?.attributes
+                params?.width = WindowManager.LayoutParams.MATCH_PARENT
+                params?.height = WindowManager.LayoutParams.MATCH_PARENT
+                window?.attributes = params
+                getButton(AlertDialog.BUTTON_POSITIVE).setTextColor(Color.WHITE)
+
+            }
+            show()
+        }
     }
+
+
 }
+
 
 
 
